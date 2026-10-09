@@ -93,6 +93,23 @@
           </div>
         </div>
       </section>
+
+      <section id="radioSettings" class="settings-panel panel" aria-label="Radio settings">
+        <div class="channels-heading">
+          <div>
+            <div class="eyebrow">RADIO CONFIGURATION</div>
+            <h2>Radio settings</h2>
+            <p class="settings-help">Load settings supported by this radio driver, edit them, then apply them to the open image. Save the image or use “Write to radio” to send it to the radio.</p>
+          </div>
+          <button id="loadSettings" class="button button-secondary" type="button" disabled>Load settings</button>
+        </div>
+        <div id="settingsStatus" class="settings-status" role="status">Open a radio image to check for configurable settings.</div>
+        <div id="settingsGroups" class="settings-groups"></div>
+        <div class="settings-actions">
+          <span id="settingsChanged" class="settings-changed" hidden>Unsaved settings changes</span>
+          <button id="applySettings" class="button button-primary" type="button" disabled>Apply settings to image</button>
+        </div>
+      </section>
       <footer>CHIRPQt · Your radio data stays on this computer.</footer>
     </main>
 

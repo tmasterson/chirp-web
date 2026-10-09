@@ -203,7 +203,7 @@ def ends_program(fn):
 def do_download(radio):
     tk8180.do_ident(radio)
 
-    data = b''
+    data = bytearray()
 
     def status():
         status = chirp_common.Status()
@@ -234,14 +234,14 @@ def do_download(radio):
         addr, length = struct.unpack('>HB', hdr)
         LOG.debug('Radio: %r %04x %02x' % (cmd, addr, length))
         if cmd == b'Z':
-            data += b'\xFF' * length
+            data.extend(b'\xFF' * length)
         elif cmd == b'W':
             block = radio.pipe.read(length)
-            data += block
+            data.extend(block)
         radio.pipe.write(b'\x06')
         status()
 
-    return memmap.MemoryMapBytes(data)
+    return memmap.MemoryMapBytes(bytes(data))
 
 
 @ends_program

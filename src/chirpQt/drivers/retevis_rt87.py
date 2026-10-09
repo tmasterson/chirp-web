@@ -263,7 +263,7 @@ def _identify(radio):
 
 def _download(radio):
     _identify(radio)
-    data = bytes([])
+    data = bytearray()
     for i in range(0, 0x2000, 0x40):
         msg = struct.pack('>cHb', b'R', i, 0x40)
         radio.pipe.write(msg)
@@ -279,7 +279,7 @@ def _download(radio):
         if len(block) != (0x40 + 4):
             raise errors.RadioError("Radio sent a short block (%02x/%02x)" % (
                 len(block), 0x44))
-        data += block[4:]
+        data.extend(block[4:])
 
         if radio.status_fn:
             status = chirp_common.Status()
@@ -290,7 +290,7 @@ def _download(radio):
 
     radio.pipe.write(b"E")
 
-    return memmap.MemoryMapBytes(data)
+    return memmap.MemoryMapBytes(bytes(data))
 
 
 def _upload(radio):

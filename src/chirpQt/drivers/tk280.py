@@ -715,7 +715,7 @@ def do_download(radio):
     status.max = MEM_SIZE // BLOCK_SIZE
     radio.status_fn(status)
 
-    data = b""
+    data = bytearray()
     count = 0
     _open_radio(radio, status)
 
@@ -723,12 +723,12 @@ def do_download(radio):
     for addr in MEM_BLOCKS:
         radio.pipe.write(_make_frame(b"R", addr))
         block = read_block(radio.pipe)
-        data += block
+        data.extend(block)
         status.cur = count
         radio.status_fn(status)
         count += 1
 
-    return memmap.MemoryMapBytes(data)
+    return memmap.MemoryMapBytes(bytes(data))
 
 
 def do_upload(radio):

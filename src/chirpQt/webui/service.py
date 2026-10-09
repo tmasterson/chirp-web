@@ -10,7 +10,7 @@ import uuid
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
-from chirpQt import chirp_common, directory
+from chirpQt import chirp_common, directory, settings
 
 import serial
 from serial.tools import list_ports
@@ -120,6 +120,7 @@ class DriverSession:
                 'dirty': self.dirty,
                 'supports_upload': isinstance(
                         radio, chirp_common.CloneModeRadio),
+                'has_settings': rf.has_settings,
                 'memory_bounds': list(rf.memory_bounds),
                 'valid_special_chans': list(rf.valid_special_chans),
                 'features': {
@@ -146,6 +147,220 @@ class DriverSession:
                     'valid_skips': list(rf.valid_skips),
                 },
             }
+
+    @staticmethod
+    def _settings_tree(radio_settings):
+        """Serialize supported driver settings for the browser editor."""
+        groups = (radio_settings if isinstance(
+                radio_settings, settings.RadioSettings) else
+                  [radio_settings])
+
+        def scalar_value(value, path, label, description, warning=None):
+            result = {
+                'path': path,
+                'label': label,
+                'description': description,
+                'mutable': value.get_mutable(),
+                'warning': warning,
+            }
+            if isinstance(value, settings.RadioSettingValueBoolean):
+                result.update(type='boolean', value=bool(value))
+            elif isinstance(value, settings.RadioSettingValueInteger):
+                result.update(
+                        type='integer', value=int(value),
+                        min=value.get_min(), max=value.get_max(),
+                        step=value.get_step())
+            elif isinstance(value, settings.RadioSettingValueFloat):
+                result.update(
+                        type='float', value=float(value),
+                        min=value.get_min(), max=value.get_max())
+            elif isinstance(value, settings.RadioSettingValueList):
+                result.update(
+                        type='list', value=value.get_value(),
+                        options=value.get_options())
+            elif isinstance(value, settings.RadioSettingValueString):
+                result.update(
+                        type='string', value=str(value).rstrip(),
+                        max=value.maxlength)
+            else:
+                raise WebServiceError(
+                        f'Unsupported radio setting type: '
+                        f'{type(value).__name__}.', 422)
+            return result
+
+        def serialize(element, path):
+            if isinstance(element, settings.RadioSetting):
+                label = element.get_shortname()
+                description = str(element.__doc__ or '')
+                values = element.value
+                if not isinstance(values, list):
+                    warning = element.get_warning(values.get_value())
+                    return scalar_value(
+                            values, path, label, description, warning)
+                children = []
+                for index, value in enumerate(values):
+                    child_path = path + [index]
+                    children.append(scalar_value(
+                            value, child_path,
+                            f'{label} {index + 1}', description))
+                return {
+                    'type': 'group', 'label': label,
+                    'description': description, 'children': children,
+                }
+            if isinstance(element, settings.RadioSettingGroup):
+                return {
+                    'type': 'group',
+                    'label': element.get_shortname(),
+                    'description': str(element.__doc__ or ''),
+                    'children': [
+                        serialize(child, path + [child.get_name()])
+                        for child in element
+                    ],
+                }
+            raise WebServiceError(
+                    'The radio driver returned an invalid settings tree.',
+                    422)
+
+        return [serialize(group, [group.get_name()]) for group in groups]
+
+    @staticmethod
+    def _valid_settings_tree(radio_settings):
+        return isinstance(
+                radio_settings,
+                (settings.RadioSettings, settings.RadioSettingGroup))
+
+    @staticmethod
+    def _find_setting_value(radio_settings, path):
+        """Resolve a browser setting path to its typed driver value."""
+        if not path:
+            raise WebServiceError('A setting path is required.', 422)
+        element = None
+        remaining = list(path)
+        first = remaining.pop(0)
+        groups = (radio_settings if isinstance(
+                radio_settings, settings.RadioSettings) else
+                  [radio_settings])
+        element = next((item for item in groups
+                        if isinstance(item, settings.RadioSettingGroup) and
+                        item.get_name() == first), None)
+        if element is None:
+            raise WebServiceError('The selected radio setting was not found.',
+                                  422)
+        owner = None
+        while remaining:
+            part = remaining.pop(0)
+            if isinstance(element, settings.RadioSettingGroup):
+                if not isinstance(part, str) or part not in element:
+                    raise WebServiceError(
+                            'The selected radio setting was not found.',
+                            422)
+                element = element[part]
+            elif isinstance(element, settings.RadioSetting):
+                owner = element
+                if not isinstance(part, int) or isinstance(part, bool):
+                    raise WebServiceError(
+                            'The selected radio setting value was not found.',
+                            422)
+                try:
+                    element = element[part]
+                except IndexError as exc:
+                    raise WebServiceError(
+                            'The selected radio setting value was not found.',
+                            422) from exc
+            else:
+                raise WebServiceError('Invalid radio setting path.', 422)
+        if isinstance(element, settings.RadioSetting):
+            owner = element
+            if len(element) != 1:
+                raise WebServiceError(
+                        'The selected radio setting requires a value index.',
+                        422)
+            element = element[0]
+        if not isinstance(element, settings.RadioSettingValue):
+            raise WebServiceError('Invalid radio setting path.', 422)
+        return element, owner
+
+    def radio_settings(self):
+        """Return editable general settings from the active radio driver."""
+        with self.lock:
+            self._ensure_idle()
+            radio = self._require_radio()
+            if not radio.get_features().has_settings:
+                return {'supported': False, 'groups': []}
+            radio_settings = radio.get_settings()
+            if not self._valid_settings_tree(radio_settings):
+                raise WebServiceError(
+                        'The radio driver did not provide usable settings.',
+                        422)
+            return {
+                'supported': True,
+                'groups': self._settings_tree(radio_settings),
+            }
+
+    def update_settings(self, changes, confirm_warnings=False):
+        """Apply validated general setting changes through the radio driver."""
+        with self.lock:
+            self._ensure_idle()
+            radio = self._require_radio()
+            if not radio.get_features().has_settings:
+                raise WebServiceError(
+                        'This radio does not support general settings.', 422)
+            radio_settings = radio.get_settings()
+            if not self._valid_settings_tree(radio_settings):
+                raise WebServiceError(
+                        'The radio driver did not provide usable settings.',
+                        422)
+            if not changes:
+                raise WebServiceError('Provide at least one setting change.')
+
+            resolved = []
+            seen = set()
+            warnings = []
+            for change in changes:
+                path = change['path']
+                key = tuple(path)
+                if key in seen:
+                    raise WebServiceError(
+                            'A setting can only be changed once per request.',
+                            422)
+                seen.add(key)
+                value, owner = self._find_setting_value(
+                        radio_settings, path)
+                requested = change['value']
+                if isinstance(value, settings.RadioSettingValueBoolean):
+                    valid_type = type(requested) is bool
+                elif isinstance(value, settings.RadioSettingValueInteger):
+                    valid_type = type(requested) is int
+                elif isinstance(value, settings.RadioSettingValueFloat):
+                    valid_type = type(requested) in (int, float)
+                elif isinstance(value, settings.RadioSettingValueList):
+                    valid_type = type(requested) in (str, int)
+                elif isinstance(value, settings.RadioSettingValueString):
+                    valid_type = type(requested) is str
+                else:
+                    raise WebServiceError(
+                            'This radio setting cannot be edited.', 422)
+                if not valid_type:
+                    raise WebServiceError(
+                            'The value type does not match this setting.',
+                            422)
+                try:
+                    value.set_value(requested)
+                except (settings.InvalidValueError, ValueError,
+                        TypeError) as exc:
+                    raise WebServiceError(str(exc), 422) from exc
+                warning = owner.get_warning(value.get_value())
+                if warning:
+                    warnings.append(str(warning))
+                resolved.append(value)
+
+            if warnings and not confirm_warnings:
+                raise WebServiceError(
+                        'Radio setting warning: ' + '; '.join(warnings) +
+                        ' Confirm to apply this change.', 409)
+            radio.set_settings(radio_settings)
+            self.dirty = True
+            return {'warnings': warnings}
 
     def memories(self, start: int, limit: int):
         """Read a bounded range of memories from the open image."""

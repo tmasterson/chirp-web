@@ -210,7 +210,7 @@ def do_download(radio):
     LOG.debug("download")
     _h777_enter_programming_mode(radio)
 
-    data = b""
+    data = bytearray()
 
     status = chirp_common.Status()
     status.msg = "Cloning from radio"
@@ -223,14 +223,14 @@ def do_download(radio):
         radio.status_fn(status)
 
         block = _h777_read_block(radio, addr, BLOCK_SIZE)
-        data += block
+        data.extend(block)
 
         LOG.debug("Address: %04x" % addr)
         LOG.debug(util.hexprint(block))
 
     _h777_exit_programming_mode(radio)
 
-    return memmap.MemoryMapBytes(data)
+    return memmap.MemoryMapBytes(bytes(data))
 
 
 def do_upload(radio):

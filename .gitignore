@@ -30,7 +30,8 @@ assets
 *.patch
 # for visual studio and visual studio code editors
 .vs/
-.vscode/
+.vscode/*
+!.vscode/mcp.json
 /CppProperties.json
 .coverage
 chirpwx.spec

@@ -55,7 +55,7 @@ def uvf8d_identify(radio):
 
 
 def tyt_uvf8d_download(radio):
-    data = uvf8d_identify(radio)
+    data = bytearray(uvf8d_identify(radio))
     for i in range(0, 0x4000, 0x20):
         msg = struct.pack(">cHb", b"R", i, 0x20)
         radio.pipe.write(msg)
@@ -66,7 +66,7 @@ def tyt_uvf8d_download(radio):
         ack = radio.pipe.read(1)
         if ack != b"A":
             raise errors.RadioError("Radio NAKed block")
-        data += block[4:]
+        data.extend(block[4:])
 
         if radio.status_fn:
             status = chirp_common.Status()
@@ -77,7 +77,7 @@ def tyt_uvf8d_download(radio):
 
     radio.pipe.write(b"ENDR")
 
-    return memmap.MemoryMapBytes(data)
+    return memmap.MemoryMapBytes(bytes(data))
 
 
 def tyt_uvf8d_upload(radio):

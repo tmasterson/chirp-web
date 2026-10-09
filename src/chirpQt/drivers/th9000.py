@@ -474,12 +474,12 @@ def do_download(radio):
     _ident(radio)
 
     _memobj = None
-    data = b""
+    data = bytearray()
 
     for start, end in radio._ranges:
         for addr in range(start, end, 0x10):
             block = _send(radio, b'R', addr, 0x10)
-            data += block
+            data.extend(block)
             status = chirp_common.Status()
             status.cur = len(data)
             status.max = end
@@ -488,7 +488,7 @@ def do_download(radio):
 
     _finish(radio)
 
-    return memmap.MemoryMapBytes(data)
+    return memmap.MemoryMapBytes(bytes(data))
 
 
 def do_upload(radio):

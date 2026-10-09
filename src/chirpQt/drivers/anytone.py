@@ -317,14 +317,14 @@ def _download(radio):
 
     memobj = None
 
-    data = b""
+    data = bytearray()
     for start, end in radio._ranges:
         for addr in range(start, end, BLOCK_SIZE):
             if memobj is not None and not _should_send_addr(memobj, addr):
                 block = b"\xFF" * BLOCK_SIZE
             else:
                 block = _send(radio, b'R', addr, BLOCK_SIZE)
-            data += block
+            data.extend(block)
 
             status = chirp_common.Status()
             status.cur = len(data)
@@ -337,7 +337,7 @@ def _download(radio):
 
     _finish(radio)
 
-    return memmap.MemoryMapBytes(data)
+    return memmap.MemoryMapBytes(bytes(data))
 
 
 def _upload(radio):

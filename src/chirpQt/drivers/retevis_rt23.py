@@ -287,7 +287,7 @@ def do_download(radio):
     LOG.debug("download")
     _rt23_enter_programming_mode(radio)
 
-    data = b""
+    data = bytearray()
 
     status = chirp_common.Status()
     status.msg = "Cloning from radio"
@@ -302,14 +302,14 @@ def do_download(radio):
         block = _rt23_read_block(radio, addr, BLOCK_SIZE)
         if addr == 0 and block.startswith(b"\xFF" * 6):
             block = b"P31183" + b"\xFF" * 10
-        data += block
+        data.extend(block)
 
         LOG.debug("Address: %04x" % addr)
         LOG.debug(util.hexprint(block))
 
     _rt23_exit_programming_mode(radio)
 
-    return memmap.MemoryMapBytes(data)
+    return memmap.MemoryMapBytes(bytes(data))
 
 
 def do_upload(radio):

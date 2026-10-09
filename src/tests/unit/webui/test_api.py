@@ -7,7 +7,8 @@ import time
 from pathlib import Path
 from types import SimpleNamespace
 
-from chirpQt import chirp_common
+from chirpQt import chirp_common, settings
+from chirpQt.drivers.fake import FakeLiveRadio
 from chirpQt.webui import service
 from chirpQt.webui.api import create_app
 
@@ -129,6 +130,69 @@ def test_memory_updates_reject_invalid_fields(client, payload):
     changed = client.patch('/api/memories/0', json=payload)
     assert changed.status_code == 422
     assert client.get('/api/session').json()['dirty'] is False
+
+
+def test_radio_settings_can_be_loaded_and_updated(client):
+    """Expose driver settings and apply validated changes to the image."""
+    class SettingsRadio(FakeLiveRadio):
+        def set_settings(self, updated):
+            self.settings['knob'] = updated[0]['knob'].value.get_value()
+
+    radio = SettingsRadio(None)
+    client.app.state.session._replace_radio(radio, 'settings.img', None)
+
+    response = client.get('/api/settings')
+    assert response.status_code == 200
+    setting = response.json()['groups'][0]['children'][0]
+    assert setting['label'] == 'A knob'
+    assert setting['type'] == 'integer'
+    assert setting['value'] == 5
+    assert setting['path'] == ['top', 'knob']
+
+    changed = client.patch('/api/settings', json={
+        'changes': [{'path': ['top', 'knob'], 'value': 8}],
+    })
+    assert changed.status_code == 200
+    assert client.get('/api/session').json()['dirty'] is True
+    assert client.get('/api/settings').json()[
+            'groups'][0]['children'][0]['value'] == 8
+
+    invalid = client.patch('/api/settings', json={
+        'changes': [{'path': ['top', 'knob'], 'value': 11}],
+    })
+    assert invalid.status_code == 422
+
+
+def test_radio_setting_warnings_require_confirmation(client):
+    """Honor driver-provided warnings before applying radio settings."""
+    class WarnRadio(FakeLiveRadio):
+        def get_settings(self):
+            setting = settings.RadioSetting(
+                    'enabled', 'Enabled',
+                    settings.RadioSettingValueBoolean(False))
+            setting.set_warning(
+                    'This changes a radio-wide feature.',
+                    safe_value=False)
+            return settings.RadioSettings(
+                    settings.RadioSettingGroup('top', 'Top', setting))
+
+        def set_settings(self, updated):
+            self.enabled = updated[0]['enabled'].value.get_value()
+
+    client.app.state.session._replace_radio(
+            WarnRadio(None), 'settings.img', None)
+    payload = {'changes': [{'path': ['top', 'enabled'], 'value': True}]}
+
+    unconfirmed = client.patch('/api/settings', json=payload)
+    assert unconfirmed.status_code == 409
+    assert 'This changes a radio-wide feature.' in unconfirmed.json()['detail']
+
+    confirmed = client.patch('/api/settings', json={
+        **payload, 'confirm_warnings': True,
+    })
+    assert confirmed.status_code == 200
+    assert confirmed.json()['warnings'] == [
+        'This changes a radio-wide feature.']
 
 
 def test_unknown_image_is_a_client_error(client):

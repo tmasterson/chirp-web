@@ -17,7 +17,15 @@ from fastapi import FastAPI, Query
 from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import (
+        BaseModel,
+        ConfigDict,
+        Field,
+        StrictBool,
+        StrictFloat,
+        StrictInt,
+        StrictStr,
+)
 
 LOG = logging.getLogger(__name__)
 STATIC_DIR = Path(__file__).with_name('static')
@@ -70,6 +78,20 @@ class MemoryUpdate(StrictModel):
     tuning_step: float | None = Field(default=None, ge=0)
     skip: str | None = Field(default=None, max_length=8)
     comment: str | None = Field(default=None, max_length=4096)
+
+
+class SettingChange(StrictModel):
+    """One setting path and its new typed value."""
+
+    path: list[StrictStr | StrictInt] = Field(min_length=2, max_length=16)
+    value: StrictBool | StrictInt | StrictFloat | StrictStr
+
+
+class SettingsUpdate(StrictModel):
+    """Requested radio-level setting changes."""
+
+    changes: list[SettingChange] = Field(min_length=1, max_length=256)
+    confirm_warnings: bool = False
 
 
 def _local_host(host: str) -> bool:
@@ -182,6 +204,16 @@ def create_app() -> FastAPI:
             raise WebServiceError(
                     'Memory field values cannot be null.', 422)
         return session.update_memory(number, values)
+
+    @app.get('/api/settings')
+    def get_settings():
+        return session.radio_settings()
+
+    @app.patch('/api/settings')
+    def update_settings(payload: SettingsUpdate):
+        return session.update_settings(
+                [change.model_dump() for change in payload.changes],
+                confirm_warnings=payload.confirm_warnings)
 
     @app.post('/api/session/save')
     def save_image():

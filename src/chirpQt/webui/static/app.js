@@ -5,6 +5,8 @@ const state = {
   total: 0,
   busy: false,
   editing: null,
+  settings: null,
+  settingValues: new Map(),
 };
 
 const $ = (selector) => document.querySelector(selector);
@@ -41,6 +43,8 @@ function setBusy(busy) {
   $('#radioModel').disabled = busy;
   $('#serialPort').disabled = busy;
   $('#refreshPorts').disabled = busy;
+  $('#loadSettings').disabled = busy || !state.session?.has_settings;
+  $('#applySettings').disabled = busy || !hasChangedSettings();
   const [low, high] = state.session?.memory_bounds || [0, 0];
   $('#previousPage').disabled = busy || state.start <= low;
   $('#nextPage').disabled = busy || state.start + state.limit > high;
@@ -89,6 +93,8 @@ function renderSession() {
     $('#channelCount').textContent = 'Open an image to begin';
     $('#memoryRows').innerHTML = '<tr class="empty-state"><td colspan="7">Your channel list will appear here after you open an image.</td></tr>';
     $('#pageLabel').textContent = '—';
+    $('#loadSettings').disabled = true;
+    $('#applySettings').disabled = true;
     setBusy(false);
     return;
   }
@@ -98,6 +104,8 @@ function renderSession() {
   $('#uploadButton').disabled = state.busy || !state.session.supports_upload;
   $('#channelTitle').textContent = state.session.name;
   $('#channelCount').textContent = `${state.total.toLocaleString()} channels`;
+  $('#loadSettings').disabled = state.busy || !state.session.has_settings;
+  $('#applySettings').disabled = state.busy || !hasChangedSettings();
 }
 
 function formatFrequency(value) {
@@ -157,6 +165,13 @@ async function loadMemories() {
 async function refreshSession() {
   state.session = await api('/api/session');
   state.start = state.session.memory_bounds[0];
+  state.settings = null;
+  state.settingValues.clear();
+  $('#settingsGroups').replaceChildren();
+  $('#settingsChanged').hidden = true;
+  $('#settingsStatus').textContent = state.session.has_settings
+    ? 'Load this radio’s settings to view and edit them.'
+    : 'This radio driver does not expose general settings.';
   renderSession();
   await loadMemories();
 }
@@ -245,7 +260,7 @@ async function watchTransfer(job) {
     showProgress(job);
   }
   if (job.state === 'failed') throw new Error(job.error || 'Radio transfer failed.');
-  if (job.operation === 'download') await refreshSession();
+  await refreshSession();
   return job;
 }
 
@@ -374,6 +389,162 @@ function openEditor(memory) {
   if (features.has_comment) add('Comment', 'comment', memory.comment, null, { wide: true });
   $('#editDialog').showModal();
 }
+
+function hasChangedSettings() {
+  return [...$('#settingsGroups').querySelectorAll('[data-setting-path]')]
+    .some((control) => {
+      const key = control.dataset.settingPath;
+      return JSON.stringify(readSettingControl(control)) !==
+        JSON.stringify(state.settingValues.get(key));
+    });
+}
+
+function readSettingControl(control) {
+  if (control.type === 'checkbox') return control.checked;
+  if (control.dataset.settingType === 'list') return JSON.parse(control.value);
+  if (control.dataset.settingType === 'integer') return Number.parseInt(control.value, 10);
+  if (control.dataset.settingType === 'float') return Number(control.value);
+  return control.value;
+}
+
+function renderSettingNode(node, parent) {
+  if (node.type === 'group') {
+    const group = document.createElement('fieldset');
+    group.className = 'settings-group';
+    const legend = document.createElement('legend');
+    legend.textContent = node.label;
+    group.append(legend);
+    if (node.description) {
+      const description = document.createElement('p');
+      description.textContent = node.description;
+      group.append(description);
+    }
+    const fields = document.createElement('div');
+    fields.className = 'settings-fields';
+    node.children.forEach((child) => renderSettingNode(child, fields));
+    group.append(fields);
+    parent.append(group);
+    return;
+  }
+
+  const field = document.createElement('label');
+  field.className = 'settings-field';
+  field.textContent = node.label;
+  let control;
+  if (node.type === 'list') {
+    control = document.createElement('select');
+    node.options.forEach((optionValue) => {
+      const option = document.createElement('option');
+      option.value = JSON.stringify(optionValue);
+      option.textContent = String(optionValue);
+      control.append(option);
+    });
+    control.value = JSON.stringify(node.value);
+  } else {
+    control = document.createElement('input');
+    if (node.type === 'boolean') {
+      control.type = 'checkbox';
+      control.checked = node.value;
+    } else if (node.type === 'integer' || node.type === 'float') {
+      control.type = 'number';
+      control.step = node.type === 'integer' ? String(node.step || 1) : 'any';
+      if (node.min !== undefined) control.min = node.min;
+      if (node.max !== undefined) control.max = node.max;
+      control.value = String(node.value);
+    } else {
+      control.type = 'text';
+      control.value = node.value;
+      if (node.max !== undefined) control.maxLength = node.max;
+    }
+  }
+  control.dataset.settingPath = JSON.stringify(node.path);
+  control.dataset.settingType = node.type;
+  control.disabled = !node.mutable;
+  control.addEventListener('input', updateSettingsChanged);
+  control.addEventListener('change', updateSettingsChanged);
+  field.append(control);
+  if (node.description || node.warning) {
+    const help = document.createElement('small');
+    help.textContent = [node.description, node.warning].filter(Boolean).join(' ');
+    field.append(help);
+  }
+  parent.append(field);
+  state.settingValues.set(control.dataset.settingPath, node.value);
+}
+
+function updateSettingsChanged() {
+  const changed = hasChangedSettings();
+  $('#settingsChanged').hidden = !changed;
+  $('#applySettings').disabled = state.busy || !changed;
+}
+
+async function loadSettings() {
+  const result = await api('/api/settings');
+  state.settings = result;
+  state.settingValues.clear();
+  const groups = $('#settingsGroups');
+  groups.replaceChildren();
+  if (!result.supported || !result.groups.length) {
+    $('#settingsStatus').textContent = result.supported
+      ? 'This driver reports no editable general settings.'
+      : 'This radio driver does not expose general settings.';
+    updateSettingsChanged();
+    return;
+  }
+  result.groups.forEach((group) => renderSettingNode(group, groups));
+  $('#settingsStatus').textContent = 'Edit the available options, then apply them to the open radio image.';
+  updateSettingsChanged();
+}
+
+$('#loadSettings').addEventListener('click', async () => {
+  try {
+    $('#settingsStatus').textContent = 'Reading settings from the open radio image…';
+    await loadSettings();
+  } catch (error) {
+    $('#settingsStatus').textContent = error.message;
+    showNotice(error.message, true);
+  }
+});
+
+$('#applySettings').addEventListener('click', async () => {
+  const changes = [...$('#settingsGroups').querySelectorAll('[data-setting-path]')]
+    .filter((control) => JSON.stringify(readSettingControl(control)) !==
+      JSON.stringify(state.settingValues.get(control.dataset.settingPath)))
+    .map((control) => ({
+      path: JSON.parse(control.dataset.settingPath),
+      value: readSettingControl(control),
+    }));
+  if (!changes.length) return;
+  const apply = async (confirmWarnings) => api('/api/settings', {
+    method: 'PATCH',
+    body: JSON.stringify({ changes, confirm_warnings: confirmWarnings }),
+  });
+  const button = $('#applySettings');
+  button.disabled = true;
+  try {
+    let result;
+    try {
+      result = await apply(false);
+    } catch (error) {
+      if (!error.message.startsWith('Radio setting warning: ') ||
+          !window.confirm(error.message)) {
+        throw error;
+      }
+      result = await apply(true);
+    }
+    state.session.dirty = true;
+    await loadSettings();
+    renderSession();
+    showNotice(result.warnings.length
+      ? `Settings applied with a warning: ${result.warnings.join('; ')}`
+      : 'Settings applied to the open image. Save the image or write it to the radio.');
+  } catch (error) {
+    showNotice(error.message, true);
+  } finally {
+    updateSettingsChanged();
+    renderSession();
+  }
+});
 
 function closeEditor() {
   $('#editDialog').close();

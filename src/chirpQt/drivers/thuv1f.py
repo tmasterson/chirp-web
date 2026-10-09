@@ -44,7 +44,7 @@ def uvf1_identify(radio):
 
 def uvf1_download(radio):
     """Download from TYT TH-UVF1"""
-    data = uvf1_identify(radio)
+    data = bytearray(uvf1_identify(radio))
 
     for i in range(0, 0x1000, 0x10):
         msg = struct.pack(">cHB", b"R", i, 0x10)
@@ -56,7 +56,7 @@ def uvf1_download(radio):
         ack = radio.pipe.read(1)
         if ack != b"\x06":
             raise errors.RadioError("Radio NAKed block")
-        data += block[4:]
+        data.extend(block[4:])
 
         status = chirp_common.Status()
         status.cur = i
@@ -66,7 +66,7 @@ def uvf1_download(radio):
 
     radio.pipe.write(b"\x45")
 
-    return memmap.MemoryMapBytes(data)
+    return memmap.MemoryMapBytes(bytes(data))
 
 
 def uvf1_upload(radio):

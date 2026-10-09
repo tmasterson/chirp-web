@@ -69,7 +69,7 @@ def do_download(radio):
     s.msg = 'Downloading'
     s.max = 0x1C00
 
-    data = bytes()
+    data = bytearray()
     for addr in range(0, 0x1C40, 0x40):
         cmd = struct.pack('>cHB', b'R', addr, 0x40)
         LOG.debug('Reading block at %04x: %r' % (addr, cmd))
@@ -86,12 +86,12 @@ def do_download(radio):
             raise errors.RadioError('Radio sent %02x (%02x) bytes, '
                                     'expected %02x' % (rlen, len(block), 0x40))
 
-        data += block
+        data.extend(block)
 
         s.cur = addr
         radio.status_fn(s)
 
-    return data
+    return bytes(data)
 
 
 def do_upload(radio):

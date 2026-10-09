@@ -177,7 +177,7 @@ def do_download(radio):
 
     verify_model(radio)
 
-    data = b""
+    data = bytearray()
     for addr in range(radio.START_ADDR,
                       radio.START_ADDR + radio._memsize,
                       radio.BLOCK_SIZE):
@@ -185,9 +185,9 @@ def do_download(radio):
         radio.status_fn(status)
 
         block = _read_block(radio, addr)
-        data += block
+        data.extend(block)
 
-    return memmap.MemoryMapBytes(data)
+    return memmap.MemoryMapBytes(bytes(data))
 
 
 def do_upload(radio):

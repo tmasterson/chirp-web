@@ -263,7 +263,7 @@ def do_download(radio):
     radio_ident = _rt22_enter_programming_mode(radio)
     LOG.info("Radio Ident is %s" % repr(radio_ident))
 
-    data = b""
+    data = bytearray()
 
     status = chirp_common.Status()
     status.msg = "Cloning from radio"
@@ -276,14 +276,14 @@ def do_download(radio):
         radio.status_fn(status)
 
         block = _rt22_read_block(radio, addr, radio._block_size)
-        data += block
+        data.extend(block)
 
         LOG.debug("Address: %04x" % addr)
         LOG.debug(util.hexprint(block))
 
     _rt22_exit_programming_mode(radio)
 
-    return memmap.MemoryMapBytes(data)
+    return memmap.MemoryMapBytes(bytes(data))
 
 
 def do_upload(radio):

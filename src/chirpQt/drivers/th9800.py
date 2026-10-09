@@ -700,7 +700,7 @@ def _identify(radio):
 
 def _download(radio, memsize=0x10000, blocksize=0x80):
     """Download from TYT TH-9800"""
-    data = _identify(radio)
+    data = bytearray(_identify(radio))
     LOG.info("ident:\n%s", util.hexprint(data))
     offset = 0x100
     for addr in range(offset, memsize, blocksize):
@@ -715,7 +715,7 @@ def _download(radio, memsize=0x10000, blocksize=0x80):
         if ack != b"A":
             LOG.debug(util.hexprint(ack))
             raise errors.RadioError("Radio NAKed block")
-        data += block[4:]
+        data.extend(block[4:])
 
         if radio.status_fn:
             status = chirp_common.Status()
@@ -726,7 +726,7 @@ def _download(radio, memsize=0x10000, blocksize=0x80):
 
     radio.pipe.write(b"ENDR")
 
-    return memmap.MemoryMapBytes(data)
+    return memmap.MemoryMapBytes(bytes(data))
 
 
 def _upload(radio, memsize=0xF400, blocksize=0x80):
