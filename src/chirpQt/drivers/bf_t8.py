@@ -24,6 +24,7 @@ from chirpQt import (
     memmap,
     util,
 )
+from chirpQt.drivers.clone_common import exit_programming_mode
 from chirpQt.settings import (
     RadioSetting,
     RadioSettingGroup,
@@ -172,7 +173,7 @@ def _enter_programming_mode(radio):
 
     # check if we had EXITO
     if exito is False:
-        _exit_programming_mode(radio)
+        exit_programming_mode(radio)
         msg = "The radio did not accept program mode after five tries.\n"
         msg += "Check you interface cable and power cycle your radio."
         raise errors.RadioError(msg)
@@ -181,11 +182,11 @@ def _enter_programming_mode(radio):
         serial.write(b"\x02")
         ident = serial.read(len(radio._fingerprint))
     except:
-        _exit_programming_mode(radio)
+        exit_programming_mode(radio)
         raise errors.RadioError("Error communicating with radio")
 
     if not ident == radio._fingerprint:
-        _exit_programming_mode(radio)
+        exit_programming_mode(radio)
         LOG.debug(util.hexprint(ident))
         raise errors.RadioError("Radio returned unknown identification string")
 
@@ -193,20 +194,12 @@ def _enter_programming_mode(radio):
         serial.write(CMD_ACK)
         ack = serial.read(1)
     except:
-        _exit_programming_mode(radio)
+        exit_programming_mode(radio)
         raise errors.RadioError("Error communicating with radio")
 
     if ack != CMD_ACK:
-        _exit_programming_mode(radio)
+        exit_programming_mode(radio)
         raise errors.RadioError("Radio refused to enter programming mode")
-
-
-def _exit_programming_mode(radio):
-    serial = radio.pipe
-    try:
-        serial.write(b"E")
-    except:
-        raise errors.RadioError("Radio refused to exit programming mode")
 
 
 def _read_block(radio, block_addr, block_size):
@@ -227,11 +220,11 @@ def _read_block(radio, block_addr, block_size):
         serial.write(CMD_ACK)
         ack = serial.read(1)
     except:
-        _exit_programming_mode(radio)
+        exit_programming_mode(radio)
         raise errors.RadioError("Failed to read block at %04x" % block_addr)
 
     if ack != CMD_ACK:
-        _exit_programming_mode(radio)
+        exit_programming_mode(radio)
         raise Exception("No ACK reading block %04x." % (block_addr))
 
     return block_data
@@ -251,7 +244,7 @@ def _write_block(radio, block_addr, block_size):
         if serial.read(1) != CMD_ACK:
             raise Exception("No ACK")
     except:
-        _exit_programming_mode(radio)
+        exit_programming_mode(radio)
         raise errors.RadioError("Failed to send block "
                                 "to radio at %04x" % block_addr)
 
@@ -278,7 +271,7 @@ def do_download(radio):
         LOG.debug("Address: %04x" % addr)
         LOG.debug(util.hexprint(block))
 
-    _exit_programming_mode(radio)
+    exit_programming_mode(radio)
 
     return memmap.MemoryMapBytes(bytes(data))
 
@@ -298,7 +291,7 @@ def do_upload(radio):
             radio.status_fn(status)
             _write_block(radio, addr, radio.BLOCK_SIZE_UP)
 
-    _exit_programming_mode(radio)
+    exit_programming_mode(radio)
 
 
 class BFT8Radio(chirp_common.CloneModeRadio):

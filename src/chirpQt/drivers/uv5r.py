@@ -1143,7 +1143,7 @@ class BaofengUV5R(chirp_common.CloneModeRadio):
 
         if mem.power:
             if self._tri_power:
-                levels = [str(l) for l in UV5R_POWER_LEVELS3]
+                levels = [str(level) for level in UV5R_POWER_LEVELS3]
                 _mem.lowpower = levels.index(str(mem.power))
             else:
                 _mem.lowpower = UV5R_POWER_LEVELS.index(mem.power)

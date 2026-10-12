@@ -171,17 +171,20 @@ TV_NAME_LENGTH = 4
 DUPLEX = ["", "-", "+", ""]
 DTCS_POLARITY = ["NN", "NR", "RN", "RR"]
 TONE_MODE = ["", "Tone", "TSQL", "DTCS"]
-TUNE_STEP = [5.0, 6.25, 8.33, 9.0, 10.0, 12.5, 15.0, 20.0, 25.0, 30.0, 50.0, 100.0, 200.0]
+TUNE_STEP = [5.0, 6.25, 8.33, 9.0, 10.0, 12.5,
+             15.0, 20.0, 25.0, 30.0, 50.0, 100.0, 200.0]
 TUNE_STEP_STR = [str(x) for x in TUNE_STEP]
 MODE = ["FM", "WFM", "AM"]
 TV_MODE = ["WFM", "AM"]
 
 SQUELCH_LEVEL = ["Open", "Auto", "Level 1", "Level 2", "Level 3", "Level 4", "Level 5",
                  "Level 6", "Level 7", "Level 8", "Level 9"]
-AUTODIAL = ["Tone call", "D0", "D1", "D2", "D3", "D4", "D5", "D6", "D7", "D8", "D9"]
+AUTODIAL = ["Tone call", "D0", "D1", "D2",
+            "D3", "D4", "D5", "D6", "D7", "D8", "D9"]
 DTMF_SPEED = ["100 ms", "200 ms", "300 ms", "400 ms"]
 SCAN_RESUME = ["0 s", "1 s", "2 s", "3 s", "4 s", "5 s", "Hold"]
-SCAN_PAUSE = ["2 s", "4 s", "6 s", "8 s", "10 s", "12 s", "14 s", "16 s", "18 s", "20 s", "Hold"]
+SCAN_PAUSE = ["2 s", "4 s", "6 s", "8 s", "10 s",
+              "12 s", "14 s", "16 s", "18 s", "20 s", "Hold"]
 BEEP_VOLUME = ["Volume", "0", "1", "2", "3", "4", "5", "6", "7", "8", "9", "10", "11", "12",
                "13", "14", "15", "16", "17", "18", "19", "20", "21", "22", "23", "24", "25",
                "26", "27", "28", "29", "30", "31"]
@@ -204,7 +207,8 @@ LCD_CONTRAST = ["1", "2", "3", "4"]
 TIMEOUT_TIMER = ["Off", "1 min", "3 min", "5 min", "10 min"]
 ACTIVE_BAND = ["All", "Single"]
 MORSE_CODE_SPEED = ["10 WPM", "15 WPM", "20 WPM", "25 WPM"]
-WX_CHANNEL = ["WX01", "WX02", "WX03", "WX04", "WX05", "WX06", "WX07", "WX08", "WX09", "WX10"]
+WX_CHANNEL = ["WX01", "WX02", "WX03", "WX04",
+              "WX05", "WX06", "WX07", "WX08", "WX09", "WX10"]
 MEMORY_DISPLAY = ["Channel", "Bank"]
 DIAL_SELECT = ["Normal", "Volume"]
 POWER = ["High", "Low"]
@@ -274,7 +278,8 @@ class ICx90Radio(icf.IcomCloneModeRadio):
         # program scan edges
         for x in range(25):
             self.special_add("Scan edge: %02dA" % x, "scan_edge", x * 2, i)
-            self.special_add("Scan edge: %02dB" % x, "scan_edge", x * 2 + 1, i + 1)
+            self.special_add("Scan edge: %02dB" %
+                             x, "scan_edge", x * 2 + 1, i + 1)
             i += 2
         # call channels
         for x in range(5):
@@ -307,7 +312,8 @@ class ICx90Radio(icf.IcomCloneModeRadio):
     # it seems the bank driver has different terminology about bank number and index
     # so in fact _get_bank and _set_bank are about indexes (i.e index in the array
     # of bank names - A .. Y
-    # and _get_bank_index and _set_bank_index are about positions in the bank (0..99)
+    # and _get_bank_index and _set_bank_index are about positions in the bank
+    # (0..99)
     def _get_bank(self, loc):
         i = self.memobj.banks[loc].bank_index
         return i if i < BANK_INDEX_NUM else None
@@ -371,7 +377,8 @@ class ICx90Radio(icf.IcomCloneModeRadio):
         return ret
 
     def dtmf_chirp2icom(self, dtmf):
-        return "".join(map(self.map_dtmf_chirp2icom, str(dtmf).rjust(DTMF_DIGITS_NUM)))
+        return "".join(map(self.map_dtmf_chirp2icom,
+                       str(dtmf).rjust(DTMF_DIGITS_NUM)))
 
     def map_dtmf_icom2chirp(self, item):
         item = ord(item)
@@ -494,9 +501,11 @@ class ICx90Radio(icf.IcomCloneModeRadio):
             for x in range(DTMF_AUTODIAL_NUM):
                 rs = RadioSetting("dtmf_codes[%d].dtmf_digits" % x, "DTMF autodial: %d" % x,
                                   RadioSettingValueString(0, DTMF_DIGITS_NUM,
-                                                          self.dtmf_icom2chirp(self.memobj.dtmf_codes[x].dtmf_digits),
+                                                          self.dtmf_icom2chirp(
+                                                              self.memobj.dtmf_codes[x].dtmf_digits),
                                                           autopad=True, charset="0123456789ABCD*#abcd "))
-                rs.set_apply_callback(self.apply_dtmf_autodial, self.memobj.dtmf_codes[x].dtmf_digits)
+                rs.set_apply_callback(
+                    self.apply_dtmf_autodial, self.memobj.dtmf_codes[x].dtmf_digits)
                 dtmf_autodial.append(rs)
 
             # expand 1
@@ -659,7 +668,8 @@ class ICx90Radio(icf.IcomCloneModeRadio):
             elif item_type == "vfo_b":
                 return (self.memobj.vfo_b_band[num], True, unique_idx)
             else:
-                raise errors.InvalidDataError("unknown special channel type '%s'" % item_type)
+                raise errors.InvalidDataError(
+                    "unknown special channel type '%s'" % item_type)
         except KeyError:
             return (self.memobj.memory[number], False, number)
 
@@ -682,11 +692,13 @@ class ICx90Radio(icf.IcomCloneModeRadio):
                 mem.name = " " * NAME_LENGTH
             else:
                 mem.name = str(mem_item.name).rstrip("\x00 ")
-            mem.rtone = chirp_common.TONES[(mem_item.tx_tone_hi << 4) + mem_item.tx_tone_lo]
+            mem.rtone = chirp_common.TONES[(
+                mem_item.tx_tone_hi << 4) + mem_item.tx_tone_lo]
             mem.ctone = chirp_common.TONES[mem_item.rx_tone]
             mem.dtcs = chirp_common.DTCS_CODES[mem_item.dtcs]
             mem.dtcs_polarity = DTCS_POLARITY[mem_item.dtcs_polarity]
-            mem.offset = self.freq_icom2chirp(mem_item.offset_freq, mem_item.offset_freq_mult)
+            mem.offset = self.freq_icom2chirp(
+                mem_item.offset_freq, mem_item.offset_freq_mult)
             mem.duplex = DUPLEX[mem_item.duplex]
             mem.tmode = TONE_MODE[mem_item.tone_mode]
             mem.tuning_step = TUNE_STEP[mem_item.tune_step]
@@ -725,7 +737,8 @@ class ICx90Radio(icf.IcomCloneModeRadio):
             mem_item.rx_tone = chirp_common.TONES.index(memory.ctone)
             mem_item.dtcs = chirp_common.DTCS_CODES.index(memory.dtcs)
             mem_item.dtcs_polarity = DTCS_POLARITY.index(memory.dtcs_polarity)
-            (mem_item.offset_freq, mem_item.offset_freq_mult) = self.freq_chirp2icom(memory.offset)
+            (mem_item.offset_freq, mem_item.offset_freq_mult) = self.freq_chirp2icom(
+                memory.offset)
             mem_item.duplex = DUPLEX.index(memory.duplex)
             mem_item.tone_mode = TONE_MODE.index(memory.tmode)
             mem_item.tune_step = TUNE_STEP.index(memory.tuning_step)
@@ -854,9 +867,9 @@ def read_template_file(template_file):
     banks_templ = {}
     with open(template_file, "r") as f:
         for line in f:
-            l = line.split(";")
-            l[1] = BANK_INDEX.index(l[1])
-            banks_templ[l[0]] = l[1:]
+            fields = line.split(";")
+            fields[1] = BANK_INDEX.index(fields[1])
+            banks_templ[fields[0]] = fields[1:]
     return banks_templ
 
 
@@ -881,7 +894,8 @@ def reorder_banks(icx90, preserve_position, preserve_unknown, banks_templ):
                 else:
                     bank_pos = banks_cnt[bank]
                     banks_cnt[bank] += 1
-                print("%s\t-> %s, %02d" % (mem.name, BANK_INDEX[bank], bank_pos))
+                print("%s\t-> %s, %02d" %
+                      (mem.name, BANK_INDEX[bank], bank_pos))
             # explicitly set non empty channel as visible
             icx90.memobj.banks[mi].invisible_channel = 0
         if bank >= BANKS or bank_pos >= BANK_NUM:
@@ -892,7 +906,8 @@ def reorder_banks(icx90, preserve_position, preserve_unknown, banks_templ):
 
 
 if __name__ == "__main__":
-    parser = argparse.ArgumentParser(description="Icom IC-E90 banks handling helper.")
+    parser = argparse.ArgumentParser(
+        description="Icom IC-E90 banks handling helper.")
     parser.add_argument("icx90_img_file", help="IC-X90 IMG file.")
     parser.add_argument("template_file", help="Banks template file.")
     parser.add_argument("-r", "--read-banks", action="store_true",
@@ -923,7 +938,8 @@ if __name__ == "__main__":
             banks_templ = read_template_file(template_file)
             if args["backup_img"]:
                 icx90.save_mmap(icx90_img_file + ".bak")
-            reorder_banks(icx90, args["preserve_position"], args["preserve_unknown"], banks_templ)
+            reorder_banks(icx90, args["preserve_position"],
+                          args["preserve_unknown"], banks_templ)
             icx90.save_mmap(icx90_img_file)
     else:
         parser.print_help()

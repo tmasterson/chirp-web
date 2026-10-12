@@ -464,13 +464,13 @@ class UV17Pro(bfc.BaofengCommonHT):
              'Please save an unedited copy of your first successful\n'
              'download to a CHIRP Radio Images(*.img) file.'
              )
-        rp.pre_download = _(
+        rp.pre_download = (
             "Follow these instructions to download your info:\n"
             "1 - Turn off your radio\n"
             "2 - Connect your interface cable\n"
             "3 - Turn on your radio\n"
             "4 - Do the download of your radio data\n")
-        rp.pre_upload = _(
+        rp.pre_upload = (
             "Follow this instructions to upload your info:\n"
             "1 - Turn off your radio\n"
             "2 - Connect your interface cable\n"
@@ -1186,11 +1186,11 @@ class UV17Pro(bfc.BaofengCommonHT):
             if chirp_common.in_range(mem.freq,
                                      [self._airband]) and mem.mode != 'AM':
                 msgs.append(chirp_common.ValidationWarning(
-                    _('Frequency in this range requires AM mode')))
+                    ('Frequency in this range requires AM mode')))
             if not chirp_common.in_range(mem.freq,
                                          [self._airband]) and mem.mode == 'AM':
                 msgs.append(chirp_common.ValidationWarning(
-                    _('Frequency in this range must not be AM mode')))
+                    ('Frequency in this range must not be AM mode')))
 
         return msgs + super().validate_memory(mem)
 

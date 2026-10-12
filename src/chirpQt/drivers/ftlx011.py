@@ -27,11 +27,13 @@ LOG = logging.getLogger(__name__)
 
 # FTL-1011
 # 0x000000  52 f0 16 90 04 08 38 c0  00 00 00 01 00 00 00 ff  |R.....8.........|
-# 0x000010  20 f1 00 20 00 00 00 20  04 47 25 04 47 25 00 00  | .. ... .G%.G%..|
+# 0x000010  20 f1 00 20 00 00 00 20  04 47 25 04 47 25 00 00  | .. ...
+# .G%.G%..|
 
 # FTL-2011
 # 0x000000: 50 90 21 40 04 80 fc 40  00 00 00 01 00 00 00 ff  |P.!@...@........|
-# 0x000010: 20 f1 00 0b 00 00 00 0b  14 51 70 14 45 70 00 00  |.........Qp.Ep..|
+# 0x000010: 20 f1 00 0b 00 00 00 0b  14 51 70 14 45 70 00 00
+# |.........Qp.Ep..|
 
 
 MEM_FORMAT = """
@@ -346,7 +348,8 @@ class ftlx011(chirp_common.CloneModeRadio, chirp_common.ExperimentalRadio):
         try:
             data = _do_download(self)
         except Exception as e:
-            raise errors.RadioError("Failed to communicate with radio:\n %s" % e)
+            raise errors.RadioError(
+                "Failed to communicate with radio:\n %s" % e)
 
         # match model
         if _model_match(self, data) is False:
@@ -495,7 +498,8 @@ class ftlx011(chirp_common.CloneModeRadio, chirp_common.ExperimentalRadio):
 
         # this radio has a primitive mode to show the channel number on a 7-segment
         # two digit LCD, we will use channel number
-        # we will use a trick to show the numbers < 10 with a space not a zero in front
+        # we will use a trick to show the numbers < 10 with a space not a zero
+        # in front
         chname = int_to_bcd(mem.number)
         if mem.number < 10:
             # convert to F# as BCD
@@ -579,7 +583,8 @@ class ftlx011(chirp_common.CloneModeRadio, chirp_common.ExperimentalRadio):
 
         # this radio has a primitive mode to show the channel number on a 7-segment
         # two digit LCD, we will use channel number
-        # we will use a trick to show the numbers < 10 with a space not a zero in front
+        # we will use a trick to show the numbers < 10 with a space not a zero
+        # in front
         chname = int_to_bcd(mem.number)
         if mem.number < 10:
             # convert to F# as BCD

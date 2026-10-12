@@ -405,7 +405,7 @@ def _recv(radio, addr, length=BLOCK_SIZE):
     hdr = _rawrecv(radio, 4)
 
     # check for unexpected extra command byte
-    c, a, l = struct.unpack(">BHB", hdr)
+    c, a, block_length = struct.unpack(">BHB", hdr)
     if hdr[0:2] == b"WW" and a != addr:
         # extra command byte detected
         # throw away the 1st byte and add the next byte in the buffer
@@ -418,11 +418,12 @@ def _recv(radio, addr, length=BLOCK_SIZE):
     LOG.info("Response:")
     LOG.debug(util.hexprint(hdr + data))
 
-    c, a, l = struct.unpack(">BHB", hdr)
-    if a != addr or l != length or c != ord(b"W"):
+    c, a, block_length = struct.unpack(">BHB", hdr)
+    if a != addr or block_length != length or c != ord(b"W"):
         _exit_program_mode(radio)
         LOG.error("Invalid answer for block 0x%04x:" % addr)
-        LOG.debug("CMD: %s  ADDR: %04x  SIZE: %02x" % (c, a, l))
+        LOG.debug("CMD: %s  ADDR: %04x  SIZE: %02x" %
+                  (c, a, block_length))
         raise errors.RadioError("Unknown response from the radio")
 
     return data

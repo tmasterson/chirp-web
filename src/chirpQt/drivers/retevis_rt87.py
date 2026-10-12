@@ -472,10 +472,8 @@ class Rt87BaseRadio(chirp_common.CloneModeRadio):
         mem = chirp_common.Memory()
 
         if isinstance(number, str):
-            mem.number = SPECIALS[number]
-            mem.extd_number = number
-        else:
-            mem.number = number
+            raise errors.InvalidMemoryLocation(number)
+        mem.number = number
 
         if _mem.get_raw(asbytes=False).startswith("\xFF\xFF\xFF\xFF"):
             mem.empty = True
@@ -577,7 +575,7 @@ class Rt87BaseRadio(chirp_common.CloneModeRadio):
         # extra settings
         for setting in mem.extra:
             if setting == "scrambler":
-                setattr(_mem, setting.get_name(), element.value - 1)
+                setattr(_mem, setting.get_name(), setting.value - 1)
             else:
                 setattr(_mem, setting.get_name(), setting.value)
 

@@ -227,10 +227,11 @@ def _recv(radio, addr, length):
     LOG.info("Response:")
     LOG.debug(util.hexprint(hdr + data))
 
-    c, a, l = struct.unpack(">BHB", hdr)
-    if a != addr or l != length or c != ord("W"):
+    c, a, block_length = struct.unpack(">BHB", hdr)
+    if a != addr or block_length != length or c != ord("W"):
         LOG.error("Invalid answer for block 0x%04x:" % addr)
-        LOG.debug("CMD: %s  ADDR: %04x  SIZE: %02x" % (c, a, l))
+        LOG.debug("CMD: %s  ADDR: %04x  SIZE: %02x" %
+                  (c, a, block_length))
         raise errors.RadioError("Unknown response from the radio")
 
     return data

@@ -1710,7 +1710,7 @@ class AnyTone778UVBase(chirp_common.CloneModeRadio,
 
     def set_settings(self, settings):
         _settings = self._memobj.settings
-        _mem = self._memobj
+        # _mem = self._memobj
         for element in settings:
             if not isinstance(element, RadioSetting):
                 self.set_settings(element)

@@ -565,6 +565,9 @@ GMRS_FREQS3 = [462550000, 462575000, 462600000, 462625000, 462650000,
 GMRS_FREQS = GMRS_FREQS1 + GMRS_FREQS2 + GMRS_FREQS3 * 2
 
 FRS_FREQS = GMRS_FREQS1 + GMRS_FREQS2 + GMRS_FREQS3
+FRS_FREQS1 = GMRS_FREQS1
+FRS_FREQS2 = GMRS_FREQS2
+FRS_FREQS3 = GMRS_FREQS3
 
 PMR_FREQS1 = [446006250, 446018750, 446031250, 446043750, 446056250,
               446068750, 446081250, 446093750]
@@ -1362,7 +1365,7 @@ class RT21Radio(chirp_common.CloneModeRadio):
                 if _keys.pf1 in PF1_VALUES:
                     idx = PF1_VALUES.index(_keys.pf1)
                 else:
-                    idx = LIST_DTMF_SPECIAL_VALUES.index(0x04)
+                    idx = PF1_VALUES.index(0x04)
                 rs = RadioSettingValueList(PF1_CHOICES, current_index=idx)
                 rset = RadioSetting("keys.pf1", "PF1 Key Function", rs)
                 rset.set_apply_callback(apply_pf1_listvalue, _keys.pf1)
@@ -1380,7 +1383,7 @@ class RT21Radio(chirp_common.CloneModeRadio):
                 if _keys.pf1 in PF1_17A_VALUES:
                     idx = PF1_17A_VALUES.index(_keys.pf1)
                 else:
-                    idx = LIST_DTMF_SPECIAL_VALUES.index(0x04)
+                    idx = PF1_17A_VALUES.index(0x04)
                 rs = RadioSettingValueList(PF1_17A_CHOICES,
                                            current_index=idx)
                 rset = RadioSetting("keys.pf1", "PF1 Key Function", rs)

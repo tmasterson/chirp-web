@@ -48,6 +48,7 @@ TXPOWER_HIGH = 0x02
 DUPLEX_NOSPLIT = 0x00
 DUPLEX_POSSPLIT = 0x01
 DUPLEX_NEGSPLIT = 0x02
+DUPLEX_ODDSPLIT = 0x03
 
 CHANNEL_WIDTH_12d5kHz = 0x00
 CHANNEL_WIDTH_20kHz = 0x01
@@ -568,7 +569,7 @@ def cstring_to_py_string(cstring):
 
 # Check the radio version reported to see if it's one we support,
 # returns bool version supported, and the band index
-def check_ver(ver_response, allowed_types):
+def check_ver(radio, ver_response, allowed_types):
     ''' Check the returned radio version is one we approve of '''
 
     LOG.debug('ver_response = ')
@@ -609,8 +610,8 @@ def _ident(radio):
     ver_response = radio.pipe.read(16)
     LOG.debug(util.hexprint(ver_response))
 
-    verok, model, bandlimit = check_ver(ver_response,
-                                        radio.ALLOWED_RADIO_TYPES)
+    verok, model, bandlimit = check_ver(
+        radio, ver_response, radio.ALLOWED_RADIO_TYPES)
     if not verok:
         _finish(radio)
         raise errors.RadioError(

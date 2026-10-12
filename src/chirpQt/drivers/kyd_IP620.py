@@ -129,11 +129,13 @@ BAT_SAVE_LIST = ["OFF", "0.2 Sec", "0.4 Sec", "0.6 Sec", "0.8 Sec", "1.0 Sec"]
 SHIFT_LIST = ["", "-", "+"]
 SCANM_LIST = ["Time", "Carrier wave", "Search"]
 ENDBEEP_LIST = ["OFF", "Begin", "End", "Begin/End"]
-POWER_LEVELS = [chirp_common.PowerLevel("Low",  watts=1.00), chirp_common.PowerLevel("Medium", watts=2.50), chirp_common.PowerLevel("High", watts=5.00)]
+POWER_LEVELS = [chirp_common.PowerLevel("Low",  watts=1.00), chirp_common.PowerLevel(
+    "Medium", watts=2.50), chirp_common.PowerLevel("High", watts=5.00)]
 TIMEOUT_LIST = ["OFF", "1 Min", "3 Min", "10 Min"]
 TOTALERT_LIST = ["", "OFF"] + ["%s seconds" % x for x in range(1, 11)]
 VOX_LIST = ["OFF"] + ["%s" % x for x in range(1, 17)]
-VOXDELAY_LIST = ["0.3 Sec", "0.5 Sec", "1.0 Sec", "1.5 Sec", "2.0 Sec", "3.0 Sec", "4.0 Sec", "5.0 Sec"]
+VOXDELAY_LIST = ["0.3 Sec", "0.5 Sec", "1.0 Sec",
+                 "1.5 Sec", "2.0 Sec", "3.0 Sec", "4.0 Sec", "5.0 Sec"]
 PRI_NUM = [3, 5, 8, 10]
 PRI_NUM_LIST = [str(x) for x in PRI_NUM]
 CH_FLAG_LIST = ["Channel+Freq", "Channel+Name"]
@@ -141,7 +143,8 @@ BACKLIGHT_LIST = ["Always Off", "Auto", "Always On"]
 BUSYLOCK_LIST = ["NO", "Carrier", "SM"]
 KEYBLOCK_LIST = ["Manual", "Auto"]
 CALLTONE_LIST = ["OFF", "1", "2", "3", "4", "5", "6", "7", "8", "1750"]
-RFSQL_LIST = ["OFF", "S-1", "S-2", "S-3", "S-4", "S-5", "S-6", "S-7", "S-8", "S-FULL"]
+RFSQL_LIST = ["OFF", "S-1", "S-2", "S-3",
+              "S-4", "S-5", "S-6", "S-7", "S-8", "S-FULL"]
 
 IP620_CHARSET = "0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ?+-* "
 
@@ -181,7 +184,8 @@ class IP620Radio(chirp_common.CloneModeRadio,
         except errors.RadioError:
             raise
         except Exception as e:
-            raise errors.RadioError("Radio refused to exit programming mode: %s" % e)
+            raise errors.RadioError(
+                "Radio refused to exit programming mode: %s" % e)
 
     def _ip620_enter_programming_mode(self):
         try:
@@ -206,7 +210,8 @@ class IP620Radio(chirp_common.CloneModeRadio,
             raise errors.RadioError("Error communicating with radio: %s" % e)
         if not _ident.startswith("\x06\x4B\x47\x36\x37\x01\x56\xF8"):
             print(util.hexprint(_ident))
-            raise errors.RadioError("Radio returned unknown identification string")
+            raise errors.RadioError(
+                "Radio returned unknown identification string")
         try:
             self.pipe.write(CMD_ACK)
             _ack = self.pipe.read(1)
@@ -243,7 +248,8 @@ class IP620Radio(chirp_common.CloneModeRadio,
             self.pipe.write(CMD_ACK)
             _ack = self.pipe.read(1)
         except:
-            raise errors.RadioError("Failed to read block at %04x" % block_addr)
+            raise errors.RadioError(
+                "Failed to read block at %04x" % block_addr)
         if _ack != CMD_ACK:
             raise Exception("No ACK reading block %04x." % (block_addr))
         return _block_data

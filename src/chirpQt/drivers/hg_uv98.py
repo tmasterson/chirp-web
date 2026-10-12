@@ -207,7 +207,8 @@ def do_ident(radio):
     radio.pipe.write(b"\x06")
     ack = radio.pipe.read(1)
     if ack != b"\x06":
-        raise errors.RadioError("Radio entered program mode, but didn't ack our ack")
+        raise errors.RadioError(
+            "Radio entered program mode, but didn't ack our ack")
 
 
 def do_download(radio):
@@ -244,7 +245,8 @@ def do_upload(radio):
 
     mmap = radio._mmap
     for addr in range(0, MAX_ADDR, CHUNK_SIZE):
-        send(radio, make_frame(b"W", addr, CHUNK_SIZE, mmap[addr:addr + CHUNK_SIZE]))
+        send(radio, make_frame(b"W", addr, CHUNK_SIZE,
+             mmap[addr:addr + CHUNK_SIZE]))
         ack = radio.pipe.read(1)
         if ack != b"\x06":
             raise errors.RadioError("Radio refused block at %04x" % addr)
@@ -293,7 +295,8 @@ class RadioSettingValueChannel(RadioSettingValueList):
 
 
 @directory.register
-class LanchonlhHG_UV98(chirp_common.CloneModeRadio, chirp_common.ExperimentalRadio):
+class LanchonlhHG_UV98(chirp_common.CloneModeRadio,
+                       chirp_common.ExperimentalRadio):
     """
     Lanchonlh HG-UV98
 
@@ -326,7 +329,8 @@ class LanchonlhHG_UV98(chirp_common.CloneModeRadio, chirp_common.ExperimentalRad
         rf.has_name = True
         rf.has_rx_dtcs = True
         rf.valid_characters = chirp_common.CHARSET_ALPHANUMERIC
-        rf.valid_tuning_steps = [5.0, 6.25, 10.0, 12.5, 20.0, 25.0, 50.0, 100.0]
+        rf.valid_tuning_steps = [5.0, 6.25,
+                                 10.0, 12.5, 20.0, 25.0, 50.0, 100.0]
         rf.valid_tmodes = ['', 'Tone', 'TSQL', 'DTCS', 'Cross']
         rf.valid_modes = MODES
         rf.valid_cross_modes = [
@@ -653,8 +657,8 @@ class LanchonlhHG_UV98(chirp_common.CloneModeRadio, chirp_common.ExperimentalRad
                             current_index=_settings.ch_b_step)))
         vfo.append(
             RadioSetting("ch_a_sql", "Squelch (A)",
-                RadioSettingValueList(SQL_LIST,
-                                      current_index=_settings.ch_a_sql)))
+                         RadioSettingValueList(SQL_LIST,
+                                               current_index=_settings.ch_a_sql)))
         vfo.append(
             RadioSetting("ch_b_sql", "Squelch (B)",
                          RadioSettingValueList(SQL_LIST,
@@ -712,9 +716,9 @@ class LanchonlhHG_UV98(chirp_common.CloneModeRadio, chirp_common.ExperimentalRad
                          RadioSettingValueBoolean(_settings.ch_b_mute)))
         aprs.append(
             RadioSetting("tx_priority", "TX Priority",
-                RadioSettingValueList(
-                    TX_PRIORITY_LIST,
-                    current_index=_settings.tx_priority)))
+                         RadioSettingValueList(
+                             TX_PRIORITY_LIST,
+                             current_index=_settings.tx_priority)))
         aprs.append(
             RadioSetting("aprs_rx_popup", "APRS Popup",
                          RadioSettingValueBoolean(_settings.aprs_rx_popup)))

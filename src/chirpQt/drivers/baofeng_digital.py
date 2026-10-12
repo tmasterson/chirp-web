@@ -21,8 +21,8 @@ from chirpQt import chirp_common, directory, errors, memmap
 from chirpQt import bitwise
 from chirpQt.drivers import baofeng_common
 from chirpQt.settings import (RadioSetting, RadioSettingGroup,
-                            RadioSettingValueBoolean,
-                            RadioSettingValueList)
+                              RadioSettingValueBoolean,
+                              RadioSettingValueList)
 
 
 LOG = logging.getLogger(__name__)

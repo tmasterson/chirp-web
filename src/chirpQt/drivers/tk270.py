@@ -17,13 +17,13 @@ import time
 import struct
 import logging
 
-LOG = logging.getLogger(__name__)
-
 from chirpQt import chirp_common, directory, memmap
 from chirpQt import bitwise, errors, util
 from chirpQt.settings import RadioSettingGroup, RadioSetting, \
     RadioSettingValueBoolean, RadioSettingValueList, \
     RadioSettingValueString, RadioSettings
+
+LOG = logging.getLogger(__name__)
 
 MEM_FORMAT = """
 #seekto 0x0010;
@@ -311,7 +311,8 @@ def model_match(cls, data):
         return False
 
 
-class Kenwood_P60_Radio(chirp_common.CloneModeRadio, chirp_common.ExperimentalRadio):
+class Kenwood_P60_Radio(chirp_common.CloneModeRadio,
+                        chirp_common.ExperimentalRadio):
     """Kenwood Mobile Family 60 Radios"""
     VENDOR = "Kenwood"
     _range = [350000000, 512000000]  # don't mind, it will be overited
@@ -793,11 +794,12 @@ class Kenwood_P60_Radio(chirp_common.CloneModeRadio, chirp_common.ExperimentalRa
                           RadioSettingValueList(TA, current_index=t))
         fkeys.append(ta)
 
-        l = int(sett.kLo)
-        if l > 1:
-            l = 0
+        low_level = int(sett.kLo)
+        if low_level > 1:
+            low_level = 0
         low = RadioSetting("settings.kLo", "Low",
-                           RadioSettingValueList(YESNO, current_index=l))
+                           RadioSettingValueList(YESNO,
+                                                 current_index=low_level))
         fkeys.append(low)
 
         return top

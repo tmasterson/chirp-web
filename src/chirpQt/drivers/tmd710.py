@@ -1532,7 +1532,6 @@ class KenwoodTMD710Radio(KenwoodTMx710Radio):
 
     def _read_mem(radio):
         """ Load the memory map """
-        global BAUD
         status = chirp_common.Status()
         status.cur = 0
         val = 0
@@ -1584,7 +1583,6 @@ class KenwoodTMD710Radio(KenwoodTMx710Radio):
 
     def _write_mem(radio):
         """ PROG MCP Blocks Send """
-        global BAUD
         # UI progress
         status = chirp_common.Status()
         status.cur = 0
@@ -1971,7 +1969,6 @@ class KenwoodTMD710GRadio(KenwoodTMx710Radio):
 
     def _read_mem(radio):
         """ Load the memory map """
-        global BAUD
         status = chirp_common.Status()
         status.cur = 0
         val = 0
@@ -2022,7 +2019,6 @@ class KenwoodTMD710GRadio(KenwoodTMx710Radio):
 
     def _write_mem(radio):
         """ PROG MCP Blocks Send """
-        global BAUD
         # UI progress
         status = chirp_common.Status()
         status.cur = 0

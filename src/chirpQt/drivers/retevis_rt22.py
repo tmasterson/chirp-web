@@ -19,6 +19,7 @@ import logging
 
 from chirpQt import chirp_common, directory, memmap
 from chirpQt import bitwise, errors, util
+from chirpQt.drivers.clone_common import exit_programming_mode
 from chirpQt.settings import RadioSetting, RadioSettingGroup, \
     RadioSettingValueInteger, RadioSettingValueList, \
     RadioSettingValueBoolean, RadioSettings, \
@@ -141,7 +142,7 @@ def _rt22_enter_programming_mode(radio):
         serial.write(b"\x02")
         ident = serial.read(8)
     except:
-        _rt22_exit_programming_mode(radio)
+        exit_programming_mode(radio)
         raise errors.RadioError("Error communicating with radio")
 
     # check if ident is OK
@@ -161,33 +162,25 @@ def _rt22_enter_programming_mode(radio):
         serial.write(CMD_ACK)
         ack = serial.read(1)
     except:
-        _rt22_exit_programming_mode(radio)
+        exit_programming_mode(radio)
         raise errors.RadioError("Error communicating with radio")
 
     if ack != CMD_ACK:
-        _rt22_exit_programming_mode(radio)
+        exit_programming_mode(radio)
         raise errors.RadioError("Radio refused to enter programming mode")
 
     try:
         serial.write(b"\x07")
         ack = serial.read(1)
     except:
-        _rt22_exit_programming_mode(radio)
+        exit_programming_mode(radio)
         raise errors.RadioError("Error communicating with radio")
 
     if ack != b"\x4E":
-        _rt22_exit_programming_mode(radio)
+        exit_programming_mode(radio)
         raise errors.RadioError("Radio refused to enter programming mode")
 
     return ident
-
-
-def _rt22_exit_programming_mode(radio):
-    serial = radio.pipe
-    try:
-        serial.write(b"E")
-    except:
-        raise errors.RadioError("Radio refused to exit programming mode")
 
 
 def _rt22_read_block(radio, block_addr, block_size):
@@ -204,7 +197,7 @@ def _rt22_read_block(radio, block_addr, block_size):
 
         response = serial.read(4 + block_size)
         if response[:4] != expectedresponse:
-            _rt22_exit_programming_mode(radio)
+            exit_programming_mode(radio)
             raise Exception("Error reading block %04x." % (block_addr))
 
         block_data = response[4:]
@@ -213,11 +206,11 @@ def _rt22_read_block(radio, block_addr, block_size):
         serial.write(CMD_ACK)
         ack = serial.read(1)
     except:
-        _rt22_exit_programming_mode(radio)
+        exit_programming_mode(radio)
         raise errors.RadioError("Failed to read block at %04x" % block_addr)
 
     if ack != CMD_ACK:
-        _rt22_exit_programming_mode(radio)
+        exit_programming_mode(radio)
         raise Exception("No ACK reading block %04x." % (block_addr))
 
     return block_data
@@ -253,7 +246,7 @@ def _rt22_write_block(radio, block_addr, block_size, _requires_patch=False,
         if serial.read(1) != CMD_ACK:
             raise Exception("No ACK")
     except:
-        _rt22_exit_programming_mode(radio)
+        exit_programming_mode(radio)
         raise errors.RadioError("Failed to send block "
                                 "to radio at %04x" % block_addr)
 
@@ -281,7 +274,7 @@ def do_download(radio):
         LOG.debug("Address: %04x" % addr)
         LOG.debug(util.hexprint(block))
 
-    _rt22_exit_programming_mode(radio)
+    exit_programming_mode(radio)
 
     return memmap.MemoryMapBytes(bytes(data))
 
@@ -312,7 +305,7 @@ def do_upload(radio):
             _rt22_write_block(radio, addr, block_size, patch_block,
                               radio_ident)
 
-    _rt22_exit_programming_mode(radio)
+    exit_programming_mode(radio)
 
 
 def model_match(cls, data):

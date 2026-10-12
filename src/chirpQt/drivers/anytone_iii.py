@@ -56,7 +56,7 @@ class ATBankModel(chirp_common.BankModel):
         index = self._radio.get_bank(memory.number)
         if (index is None or index != mapping.get_index()):
             raise Exception("Memory %d is not in bank %s" %
-                            (memory.number, bank.get_name()))
+                            (memory.number, mapping.get_name()))
         self._radio.clr_bank(memory.number)
 
     def get_mapping_memories(self, bank):

@@ -177,10 +177,11 @@ def _recv(radio, addr):
         raise errors.RadioError("Wrong block length (long) at 0x%04x" % addr)
 
     # header validation
-    c, a, l = struct.unpack(">cHB", block[0:4])
-    if c != b"W" or a != addr or l != BLOCK_SIZE:
+    c, a, block_length = struct.unpack(">cHB", block[0:4])
+    if c != b"W" or a != addr or block_length != BLOCK_SIZE:
         LOG.debug("Invalid header for block 0x%04x:" % addr)
-        LOG.debug("CMD: %s  ADDR: %04x  SIZE: %02x" % (c, a, l))
+        LOG.debug("CMD: %s  ADDR: %04x  SIZE: %02x" %
+                  (c, a, block_length))
         raise errors.RadioError("Invalid header for block 0x%04x:" % addr)
 
     # return the data, 16 bytes of payload

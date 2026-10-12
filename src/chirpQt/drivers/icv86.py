@@ -274,7 +274,8 @@ class ICV86Radio(icf.IcomCloneModeRadio):
             try:
                 number = SPECIAL[number]
             except KeyError:
-                raise errors.InvalidMemoryLocation("Unknown channel %s" % number)
+                raise errors.InvalidMemoryLocation(
+                    "Unknown channel %s" % number)
 
         return self._get_memory(number)
 

@@ -307,7 +307,7 @@ class DRx35Radio(AlincoStyleRadio):
     def get_memory(self, number):
         _mem = self._memobj.memory[number]
         _skp = self._memobj.skips[number / 8]
-        _usd = self._memobj.used_flags[number / 8]
+        # _usd = self._memobj.used_flags[number / 8]
         bit = (0x80 >> (number % 8))
 
         mem = chirp_common.Memory()
@@ -344,7 +344,7 @@ class DRx35Radio(AlincoStyleRadio):
     def set_memory(self, mem):
         _mem = self._memobj.memory[mem.number]
         _skp = self._memobj.skips[mem.number / 8]
-        _usd = self._memobj.used_flags[mem.number / 8]
+        # _usd = self._memobj.used_flags[mem.number / 8]
         bit = (0x80 >> (mem.number % 8))
 
         if self._get_used(mem.number) and not mem.empty:
@@ -601,7 +601,7 @@ class AlincoDJG7(AlincoStyleRadio):
     @classmethod
     def get_prompts(cls):
         rp = chirp_common.RadioPrompts()
-        rp.pre_download = _(
+        rp.pre_download = (
             "1. Ensure your firmware version is 4_10 or higher\n"
             "2. Turn radio off\n"
             "3. Connect your interface cable\n"
@@ -610,7 +610,7 @@ class AlincoDJG7(AlincoStyleRadio):
             "6. Supported baud rates: 57600 (default) and 19200\n"
             "   (rotate dial while holding MONI to change)\n"
             "7. Click OK\n")
-        rp.pre_upload = _(
+        rp.pre_upload = (
             "1. Ensure your firmware version is 4_10 or higher\n"
             "2. Turn radio off\n"
             "3. Connect your interface cable\n"

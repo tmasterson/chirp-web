@@ -894,7 +894,7 @@ class UV5X3(bfc.BaofengCommonHT):
 
         try:
             val = bfc.bcd_decode_freq(_mem.subvfob.vhf2.freq)
-        except settings.InternalError:
+        except InternalError:
             LOG.debug('Failed to decode VFO B VHF2 (Saved)')
             val = "000.000000"
         val1b = RadioSettingValueString(0, 10, val)

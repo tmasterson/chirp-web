@@ -1158,7 +1158,7 @@ class FT1Radio(yaesu_clone.YaesuCloneModeRadio):
         ndx = mem.number - ALLNAMES.index("Home1") - self.MAX_MEM_SLOT - 1
         if 10 >= ndx >= 0:
             f = VALID_BANDS[ndx]
-            if not(f[0] < mem.freq < f[1]):
+            if not (f[0] < mem.freq < f[1]):
                 msgs.append(chirp_common.ValidationError(
                             "Frequency outside of band for Home%2d" %
                             (ndx + 1)))
@@ -1940,8 +1940,8 @@ class FT1Radio(yaesu_clone.YaesuCloneModeRadio):
                                       r.Rooms[j])
                 WXmenu.append(rs)
                 cn = ''
-                for l in range(0, 16):
-                    s = r.Rooms[j].name[l]
+                for index in range(0, 16):
+                    s = r.Rooms[j].name[index]
                     if int(s) != 0xff:
                         cn = cn + str(s)
                 val = RadioSettingValueString(0, 16, str(cn))

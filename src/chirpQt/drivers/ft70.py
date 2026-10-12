@@ -505,10 +505,12 @@ class FT70Radio(yaesu_clone.YaesuCloneModeRadio):
 
     _BEEP_SELECT = ("Off", "Key+Scan", "Key")
     _OPENING_MESSAGE = ("Off", "DC", "Message")
-    _MIC_GAIN = ("Level 1", "Level 2", "Level 3", "Level 4", "Level 5", "Level 6", "Level 7", "Level 8", "Level 9")
+    _MIC_GAIN = ("Level 1", "Level 2", "Level 3", "Level 4",
+                 "Level 5", "Level 6", "Level 7", "Level 8", "Level 9")
     _AMS_TX_MODE = ("TX Auto", "TX DIGITAL", "TX FM")
     _VW_MODE = ("On", "Off")
-    _DIG_POP_UP = ("Off", "2sec", "4sec", "6sec", "8sec", "10sec", "20sec", "30sec", "60sec", "Continuous")
+    _DIG_POP_UP = ("Off", "2sec", "4sec", "6sec", "8sec",
+                   "10sec", "20sec", "30sec", "60sec", "Continuous")
     _STANDBY_BEEP = ("On", "Off")
     _SCAN_RESUME = ["%.1fs" % (0.5 * x) for x in range(4, 21)] + \
                    ["Busy", "Hold"]
@@ -531,8 +533,10 @@ class FT70Radio(yaesu_clone.YaesuCloneModeRadio):
     _HOME_REV = ("Home", "Reverse")
     _LOCK = ("KEY", "DIAL", "Key+Dial", "PTT", "Key+PTT", "Dial+PTT", "ALL")
     _PTT_DELAY = ("Off", "20 ms", "50 ms", "100 ms", "200 ms")
-    _BEEP_LEVEL = ("Level 1", "Level 2", "Level 3", "Level 4", "Level 5", "Level 6", "Level 7")
-    _SET_MODE = ("Level 1", "Level 2", "Level 3", "Level 4", "Level 5", "Level 6", "Level 7")
+    _BEEP_LEVEL = ("Level 1", "Level 2", "Level 3",
+                   "Level 4", "Level 5", "Level 6", "Level 7")
+    _SET_MODE = ("Level 1", "Level 2", "Level 3",
+                 "Level 4", "Level 5", "Level 6", "Level 7")
     _RX_SAVE = ("OFF", "0.2s", ".3s", ".4s", ".5s", ".6s", ".7s", ".8s", ".9s", "1.0s", "1.5s",
                 "2.0s", "2.5s", "3.0s", "3.5s", "4.0s", "4.5s", "5.0s", "5.5s", "6.0s", "6.5s", "7.0s",
                 "7.5s", "8.0s", "8.5s", "9.0s", "10.0s", "15s", "20s", "25s", "30s", "35s", "40s", "45s", "50s", "55s",
@@ -548,7 +552,8 @@ class FT70Radio(yaesu_clone.YaesuCloneModeRadio):
     _GM_RING = ("OFF", "IN RING", "AlWAYS")
     _GM_INTERVAL = ("LONG", "NORMAL", "OFF")
 
-    _MYCALL_CHR_SET = list(string.ascii_uppercase) + list(string.digits) + ['-', '/']
+    _MYCALL_CHR_SET = (
+        list(string.ascii_uppercase) + list(string.digits) + ['-', '/'])
 
     @classmethod
     def match_model(cls, filedata, filename):
@@ -611,7 +616,8 @@ class FT70Radio(yaesu_clone.YaesuCloneModeRadio):
                           repr(self._memobj.flag[number - 1])])
 
     def _checksums(self):
-        return [yaesu_clone.YaesuChecksum(0x0000, 0xFEC9)]  # The whole file -2 bytes
+        # The whole file -2 bytes
+        return [yaesu_clone.YaesuChecksum(0x0000, 0xFEC9)]
 
     @staticmethod
     def _add_ff_pad(val, length):
@@ -791,7 +797,8 @@ class FT70Radio(yaesu_clone.YaesuCloneModeRadio):
                     dtmfstr += FT70_DTMF_CHARS[c]
             dtmfentry = RadioSettingValueString(0, 16, dtmfstr)
             dtmfentry.set_charset(
-                FT70_DTMF_CHARS + list("abcdef "))  # Allow input in lowercase, space ? validation fails otherwise
+                # Allow input in lowercase, space ? validation fails otherwise
+                FT70_DTMF_CHARS + list("abcdef "))
             rs = RadioSetting(name, name.upper(), dtmfentry)
             rs.set_apply_callback(self.apply_dtmf, i)
             menu.append(rs)
@@ -827,7 +834,8 @@ class FT70Radio(yaesu_clone.YaesuCloneModeRadio):
         menu = RadioSettingGroup("config_settings", "Config")
         scan_settings = self._memobj.scan_settings
 
-        # 02 APO    Set the length of time until the transceiver turns off automatically.
+        # 02 APO    Set the length of time until the transceiver turns off
+        # automatically.
 
         first_settings = self._memobj.first_settings
         val = RadioSettingValueList(
@@ -861,7 +869,8 @@ class FT70Radio(yaesu_clone.YaesuCloneModeRadio):
         rs = RadioSetting("beep_settings", "Beep Level", val)
         menu.append(rs)
 
-        # 06 BEP.Edg    Sets the beep sound ON or OFF when a band edge is encountered.
+        # 06 BEP.Edg    Sets the beep sound ON or OFF when a band edge is
+        # encountered.
 
         val = RadioSettingValueList(
             self._OFF_ON,
@@ -869,7 +878,8 @@ class FT70Radio(yaesu_clone.YaesuCloneModeRadio):
         rs = RadioSetting("scan_settings.beep_edge", "Beep Band Edge", val)
         menu.append(rs)
 
-        # 10 Bsy.LED    Turn the MODE/STATUS Indicator ON or OFF while receiving signals.
+        # 10 Bsy.LED    Turn the MODE/STATUS Indicator ON or OFF while
+        # receiving signals.
 
         val = RadioSettingValueList(
             self._ON_OFF,
@@ -893,7 +903,8 @@ class FT70Radio(yaesu_clone.YaesuCloneModeRadio):
         rs = RadioSetting("scan_settings.home_vfo", "Home->VFO", val)
         menu.append(rs)
 
-        # 30 LOCK       Configure the lock mode setting. KEY / DIAL / K+D / PTT / K+P / D+P / ALL
+        # 30 LOCK       Configure the lock mode setting. KEY / DIAL / K+D / PTT
+        # / K+P / D+P / ALL
 
         val = RadioSettingValueList(
             self._LOCK,
@@ -909,7 +920,8 @@ class FT70Radio(yaesu_clone.YaesuCloneModeRadio):
         rs = RadioSetting("scan_settings.moni", "MONI/T-CALL", val)
         menu.append(rs)
 
-        # 42 PTT.DLY    Set the PTT delay time. OFF / 20 ms / 50 ms / 100 ms / 200 ms
+        # 42 PTT.DLY    Set the PTT delay time. OFF / 20 ms / 50 ms / 100 ms /
+        # 200 ms
 
         val = RadioSettingValueList(
             self._PTT_DELAY,
@@ -933,7 +945,8 @@ class FT70Radio(yaesu_clone.YaesuCloneModeRadio):
         rs = RadioSetting("scan_settings.rx_save", "RX SAVE", val)
         menu.append(rs)
 
-        # 60 VFO.MOD    Set the frequency setting range in the VFO mode by DIAL knob. ALL / BAND
+        # 60 VFO.MOD    Set the frequency setting range in the VFO mode by DIAL
+        # knob. ALL / BAND
 
         val = RadioSettingValueList(
             self._VFO_MODE,
@@ -984,7 +997,8 @@ class FT70Radio(yaesu_clone.YaesuCloneModeRadio):
         mycall = self._memobj.my_call
         mycallstr = str(mycall.callsign).rstrip("\xFF")
 
-        mycallentry = RadioSettingValueString(0, 10, mycallstr, False, charset=self._MYCALL_CHR_SET)
+        mycallentry = RadioSettingValueString(
+            0, 10, mycallstr, False, charset=self._MYCALL_CHR_SET)
         rs = RadioSetting('mycall.callsign', 'MYCALL', mycallentry)
         rs.set_apply_callback(self.apply_mycall, mycall)
         menu.append(rs)
@@ -1041,7 +1055,8 @@ class FT70Radio(yaesu_clone.YaesuCloneModeRadio):
             self._DIG_POP_UP,
             current_index=0 if digital_settings_more.digital_popup == 0 else digital_settings_more.digital_popup - 9)
 
-        rs = RadioSetting("digital_settings_more.digital_popup", "Digital Popup", val)
+        rs = RadioSetting(
+            "digital_settings_more.digital_popup", "Digital Popup", val)
         rs.set_apply_callback(self.apply_digital_popup, digital_settings_more)
         menu.append(rs)
 
@@ -1058,7 +1073,8 @@ class FT70Radio(yaesu_clone.YaesuCloneModeRadio):
     def _get_gm_settings(self):
         menu = RadioSettingGroup("first_settings", "Group Monitor")
 
-        # 24 GM RNG Select the beep option while receiving digital GM information. OFF / IN RNG /ALWAYS
+        # 24 GM RNG Select the beep option while receiving digital GM
+        # information. OFF / IN RNG /ALWAYS
 
         first_settings = self._memobj.first_settings
         val = RadioSettingValueList(
@@ -1067,7 +1083,8 @@ class FT70Radio(yaesu_clone.YaesuCloneModeRadio):
         rs = RadioSetting("first_settings.gm_ring", "GM Ring", val)
         menu.append(rs)
 
-        # 25 GM INT Set the transmission interval of digital GM information. OFF / NORMAL / LONG
+        # 25 GM INT Set the transmission interval of digital GM information.
+        # OFF / NORMAL / LONG
 
         scan_settings = self._memobj.scan_settings
         val = RadioSettingValueList(
@@ -1082,32 +1099,39 @@ class FT70Radio(yaesu_clone.YaesuCloneModeRadio):
         menu = RadioSettingGroup("scan_settings", "Scan")
         scan_settings = self._memobj.scan_settings
 
-        # 23 DW RVT     Turn the "Priority Channel Revert" feature ON or OFF during Dual Receive.
+        # 23 DW RVT     Turn the "Priority Channel Revert" feature ON or OFF
+        # during Dual Receive.
 
         val = RadioSettingValueList(
             self._OFF_ON,
             current_index=scan_settings.dw_rt)
-        rs = RadioSetting("scan_settings.dw_rt", "Dual Watch Priority Channel Revert", val)
+        rs = RadioSetting("scan_settings.dw_rt",
+                          "Dual Watch Priority Channel Revert", val)
         menu.append(rs)
 
-        # 21 DW INT Set the priority memory channel monitoring interval during Dual Receive. 0.1S - 5.0S - 10.0S
+        # 21 DW INT Set the priority memory channel monitoring interval during
+        # Dual Receive. 0.1S - 5.0S - 10.0S
 
         val = RadioSettingValueList(
             self._SCAN_RESTART,
             current_index=scan_settings.dw_interval)
-        rs = RadioSetting("scan_settings.dw_interval", "Dual Watch Interval", val)
+        rs = RadioSetting("scan_settings.dw_interval",
+                          "Dual Watch Interval", val)
         menu.append(rs)
 
-        # 22 DW RSM Configure the scan stop mode settings for Dual Receive. 2.0S - 10.0 S / BUSY / HOLD
+        # 22 DW RSM Configure the scan stop mode settings for Dual Receive.
+        # 2.0S - 10.0 S / BUSY / HOLD
 
         first_settings = self._memobj.first_settings
         val = RadioSettingValueList(
             self._SCAN_RESUME,
             current_index=first_settings.dw_resume_interval)
-        rs = RadioSetting("first_settings.dw_resume_interval", "Dual Watch Resume Interval", val)
+        rs = RadioSetting("first_settings.dw_resume_interval",
+                          "Dual Watch Resume Interval", val)
         menu.append(rs)
 
-        # 51 SCN.LMP   Set the scan lamp ON or OFF when scanning stops. OFF / ON
+        # 51 SCN.LMP   Set the scan lamp ON or OFF when scanning stops. OFF /
+        # ON
 
         val = RadioSettingValueList(
             self._OFF_ON,
@@ -1129,7 +1153,8 @@ class FT70Radio(yaesu_clone.YaesuCloneModeRadio):
 
         # Scan Resume Section
 
-        # 52 SCN.RSM    Configure the scan stop mode settings. 2.0 S - 5.0 S - 10.0 S / BUSY / HOLD
+        # 52 SCN.RSM    Configure the scan stop mode settings. 2.0 S - 5.0 S -
+        # 10.0 S / BUSY / HOLD
 
         first_settings = self._memobj.first_settings
         val = RadioSettingValueList(
@@ -1161,7 +1186,8 @@ class FT70Radio(yaesu_clone.YaesuCloneModeRadio):
 
     @classmethod
     def apply_ff_padded_string(cls, setting, obj):
-        setattr(obj, "padded_string", cls._add_ff_pad(setting.value.get_value().rstrip(), 6))
+        setattr(obj, "padded_string", cls._add_ff_pad(
+            setting.value.get_value().rstrip(), 6))
 
     def set_settings(self, settings):
         _mem = self._memobj
@@ -1218,13 +1244,15 @@ class FT70Radio(yaesu_clone.YaesuCloneModeRadio):
 
     def apply_digital_popup(cls, setting, obj):
         rawval = setting.value.get_value()
-        val = 0 if cls._DIG_POP_UP.index(rawval) == 0 else cls._DIG_POP_UP.index(rawval) + 9
+        val = 0 if cls._DIG_POP_UP.index(
+            rawval) == 0 else cls._DIG_POP_UP.index(rawval) + 9
         obj.digital_popup = val
 
     def apply_mycall(cls, setting, obj):
         cs = setting.value.get_value()
         if cs[0] in ('-', '/'):
-            raise InvalidValueError("First character of call sign can't be - or /:  {0:s}".format(cs))
+            raise InvalidValueError(
+                "First character of call sign can't be - or /:  {0:s}".format(cs))
         else:
             obj.callsign = cls._add_ff_pad(cs.rstrip(), 10)
 

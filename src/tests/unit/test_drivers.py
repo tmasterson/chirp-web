@@ -4,7 +4,7 @@ from io import StringIO
 from types import SimpleNamespace
 
 from chirpQt import chirp_common, errors, memmap
-from chirpQt.drivers import generic_csv, wouxun_common
+from chirpQt.drivers import clone_common, generic_csv, wouxun_common
 
 import pytest
 
@@ -139,6 +139,25 @@ class FakePipe:
     def read(self, length):
         """Return the next queued response."""
         return self.responses.pop(0)
+
+
+def test_clone_exit_programming_mode_sends_exit_command():
+    """Send the shared exit command to the radio."""
+    pipe = FakePipe([])
+
+    clone_common.exit_programming_mode(SimpleNamespace(pipe=pipe))
+
+    assert pipe.writes == [b"E"]
+
+
+def test_clone_exit_programming_mode_reports_write_errors():
+    """Convert serial write failures to a radio error."""
+    class BrokenPipe:
+        def write(self, data):
+            raise OSError("disconnected")
+
+    with pytest.raises(errors.RadioError, match="exit programming mode"):
+        clone_common.exit_programming_mode(SimpleNamespace(pipe=BrokenPipe()))
 
 
 def test_wouxun_download_accumulates_blocks_and_reports_progress():

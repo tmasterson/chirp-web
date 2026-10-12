@@ -549,7 +549,8 @@ FIVE_TONE_ALERT_TRANSPOND = list(zip(['Off', 'Alert tone',
                                       'Transpond', 'Transpond-ID code'],
                                      [255] + list(range(1, 4))))
 
-BFM_BANDS = ['87.5-108 MHz', '76.0-91.0 MHz', '76.0-108.0 MHz', '65.0-76.0 MHz']
+BFM_BANDS = ['87.5-108 MHz', '76.0-91.0 MHz',
+             '76.0-108.0 MHz', '65.0-76.0 MHz']
 BFM_STRIDE = ['100 kHz', '50 kHz']
 
 
@@ -931,7 +932,7 @@ class MappedCodedStringSettingValue(settings.RadioSettingValueString):
                  charset=ASCIIPART, padchar=' ', autowrite=True,
                  str_from_mem=lambda mve, lve: str(mve[0:int(lve)]),
                  mem_val_from_str=lambda s, fl: s[0:fl],
-                 mem_len_from_int=lambda l: l):
+                 mem_len_from_int=lambda length: length):
         """
         val_mem          - memory map entry for the value
         len_mem          - memory map entry for the length (or None)
@@ -987,10 +988,10 @@ class MappedCodedStringSettingValue(settings.RadioSettingValueString):
         if not self.get_mutable() or self._mem_val_from_str is None:
             return
         v = self.get_value()
-        l = len(v)
+        value_length = len(v)
         self._val_mem.set_value(self._mem_val_from_str(v, len(self._val_mem)))
         if self._len_mem is not None and self._mem_len_from_int is not None:
-            self._len_mem.set_value(self._mem_len_from_int(l))
+            self._len_mem.set_value(self._mem_len_from_int(value_length))
 
 
 class MappedFFStringSettingValue(MappedCodedStringSettingValue):
@@ -1504,22 +1505,22 @@ class Puxing_PX888K_Radio(chirp_common.CloneModeRadio):
             integer_setting("vhflo", "VHF lower bound",
                             _model.band_limits[0].lower_freq,
                             134, 176,
-                            int_from_mem=lambda x:int(int(x)/10),
+                            int_from_mem=lambda x: int(int(x)/10),
                             mem_from_int=None),
             integer_setting("vhfhi", "VHF upper bound",
                             _model.band_limits[0].upper_freq,
                             134, 176,
-                            int_from_mem=lambda x:int(int(x)/10),
+                            int_from_mem=lambda x: int(int(x)/10),
                             mem_from_int=None),
             integer_setting("uhflo", "UHF lower bound",
                             _model.band_limits[1].lower_freq,
                             400, 480,
-                            int_from_mem=lambda x:int(int(x)/10),
+                            int_from_mem=lambda x: int(int(x)/10),
                             mem_from_int=None),
             integer_setting("uhfhi", "UHF upper bound",
                             _model.band_limits[1].upper_freq,
                             400, 480,
-                            int_from_mem=lambda x:int(int(x)/10),
+                            int_from_mem=lambda x: int(int(x)/10),
                             mem_from_int=None),
             ff_string_setting("model", "Model string",
                               _model.model_string,
@@ -1553,17 +1554,17 @@ class Puxing_PX888K_Radio(chirp_common.CloneModeRadio):
             integer_setting("achan", "A channel index",
                             _settings.channel_a,
                             1, 128,
-                            int_from_mem=lambda i:i+1,
-                            mem_from_int=lambda i:i-1),
+                            int_from_mem=lambda i: i+1,
+                            mem_from_int=lambda i: i-1),
             integer_setting("bchan", "B channel index",
                             _settings.channel_b,
                             1, 128,
-                            int_from_mem=lambda i:i+1,
-                            mem_from_int=lambda i:i-1),
+                            int_from_mem=lambda i: i+1,
+                            mem_from_int=lambda i: i-1),
             integer_setting("pchan", "Priority channel index",
                             _settings.priority_channel,
-                            1, 128, int_from_mem=lambda i:i+1,
-                            mem_from_int=lambda i:i-1),
+                            1, 128, int_from_mem=lambda i: i+1,
+                            mem_from_int=lambda i: i-1),
             list_setting("cactive", "Call channel active?",
                          _settings.call_channel_active,
                          NO_YES),
@@ -1671,23 +1672,23 @@ class Puxing_PX888K_Radio(chirp_common.CloneModeRadio):
             integer_setting("time",   "Digit time (ms)",
                             _dtmf_settings.timing.digit_length,
                             50,  200, step=10,
-                            int_from_mem=lambda x:x*10,
-                            mem_from_int=lambda x:int(x/10)),
+                            int_from_mem=lambda x: x*10,
+                            mem_from_int=lambda x: int(x/10)),
             integer_setting("pause",  "Inter digit time (ms)",
                             _dtmf_settings.timing.digit_length,
                             50,  200, step=10,
-                            int_from_mem=lambda x:x*10,
-                            mem_from_int=lambda x:int(x/10)),
+                            int_from_mem=lambda x: x*10,
+                            mem_from_int=lambda x: int(x/10)),
             integer_setting("time1",  "First digit time (ms)",
                             _dtmf_settings.timing.digit_length,
                             50,  200, step=10,
-                            int_from_mem=lambda x:x*10,
-                            mem_from_int=lambda x:int(x/10)),
+                            int_from_mem=lambda x: x*10,
+                            mem_from_int=lambda x: int(x/10)),
             integer_setting("pause1", "First digit delay (ms)",
                             _dtmf_settings.timing.digit_length,
                             100, 1000, step=50,
-                            int_from_mem=lambda x:x*50,
-                            mem_from_int=lambda x:int(x/50)),
+                            int_from_mem=lambda x: x*50,
+                            mem_from_int=lambda x: int(x/50)),
 
             list_setting("arst", "Auto reset time",
                          _dtmf_settings.reset_time,
@@ -1752,17 +1753,19 @@ class Puxing_PX888K_Radio(chirp_common.CloneModeRadio):
             ]
         for i in range(4):
             s = ['z1', 'z2', 'c1', 'ct'][i]
-            l = FIVE_TONE_STANDARDS[i]
+            standard = FIVE_TONE_STANDARDS[i]
             data_5tone_settings.append(
                 settings.RadioSettingGroup(
-                    s, '%s settings' % l,
-                    integer_setting("%speriod" % s, "%s Period (ms)" % l,
+                    s, '%s settings' % standard,
+                    integer_setting("%speriod" % s,
+                                    "%s Period (ms)" % standard,
                                     _5tone_settings.tone_settings[i].period,
                                     20, 255),
-                    list_setting("%sgrp" % s, "%s Group code" % l,
+                    list_setting("%sgrp" % s, "%s Group code" % standard,
                                  _5tone_settings.tone_settings[i].group_code,
                                  HEXADECIMAL),
-                    list_setting("%srpt" % s, "%s Repeat code" % l,
+                    list_setting("%srpt" % s,
+                                 "%s Repeat code" % standard,
                                  _5tone_settings.tone_settings[i].repeat_code,
                                  HEXADECIMAL)))
 

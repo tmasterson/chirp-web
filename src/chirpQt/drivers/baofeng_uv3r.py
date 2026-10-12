@@ -47,13 +47,15 @@ def _uv3r_prep(radio):
 
 def uv3r_prep(radio):
     """Do the UV3R identification dance"""
+    error = None
     for _i in range(0, 10):
         try:
             return _uv3r_prep(radio)
-        except errors.RadioError as e:
+        except errors.RadioError as exc:
+            error = exc
             time.sleep(1)
 
-    raise e
+    raise error
 
 
 def uv3r_download(radio):

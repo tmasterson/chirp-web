@@ -426,10 +426,11 @@ def _recv(radio, addr):
         raise errors.RadioError("Bad ack from radio in block 0x%04x" % addr)
 
     # header validation
-    c, a, l = struct.unpack(">BHB", block[1:5])
-    if a != addr or l != BLOCK_SIZE or c != ord("X"):
+    c, a, block_length = struct.unpack(">BHB", block[1:5])
+    if a != addr or block_length != BLOCK_SIZE or c != ord("X"):
         LOG.debug("Invalid header for block 0x%04x" % addr)
-        LOG.debug("CMD: %s  ADDR: %04x  SIZE: %02x" % (c, a, l))
+        LOG.debug("CMD: %s  ADDR: %04x  SIZE: %02x" %
+                  (c, a, block_length))
         raise errors.RadioError("Invalid header for block 0x%04x:" % addr)
 
     # return the data

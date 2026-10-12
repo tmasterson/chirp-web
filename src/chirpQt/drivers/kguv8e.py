@@ -378,7 +378,8 @@ class KGUV8ERadio(chirp_common.CloneModeRadio,
     @classmethod
     def match_model(cls, filedata, filename):
         id = cls._file_ident
-        return cls._file_ident in b'kg' + filedata[0x426:0x430].replace(b'(', b'').replace(b')', b'').lower()
+        return cls._file_ident in b'kg' + \
+            filedata[0x426:0x430].replace(b'(', b'').replace(b')', b'').lower()
 
     def _identify(self):
         """Do the identification dance"""
@@ -740,7 +741,7 @@ class KGUV8ERadio(chirp_common.CloneModeRadio,
         rs = RadioSetting("language", "Language",
                           RadioSettingValueList(LANGUAGE_LIST,
                                                 current_index=_settings.
-                                                              language))
+                                                language))
         cfg_grp.append(rs)
         rs = RadioSetting("timeout", "Timeout Timer",
                           RadioSettingValueList(
@@ -771,12 +772,12 @@ class KGUV8ERadio(chirp_common.CloneModeRadio,
         rs = RadioSetting("backlight", "Backlight",
                           RadioSettingValueList(BACKLIGHT_LIST,
                                                 current_index=_settings.
-                                                               backlight))
+                                                backlight))
         cfg_grp.append(rs)
         rs = RadioSetting("dtmf_st", "DTMF Sidetone",
                           RadioSettingValueList(DTMFST_LIST,
                                                 current_index=_settings.
-                                                            dtmf_st))
+                                                dtmf_st))
         cfg_grp.append(rs)
         rs = RadioSetting("ani_sw", "ANI-ID Switch",
                           RadioSettingValueBoolean(_settings.ani_sw))
@@ -792,7 +793,7 @@ class KGUV8ERadio(chirp_common.CloneModeRadio,
         rs = RadioSetting("scan_rev", "Scan Mode",
                           RadioSettingValueList(SCANMODE_LIST,
                                                 current_index=_settings.
-                                                              scan_rev))
+                                                scan_rev))
         cfg_grp.append(rs)
         rs = RadioSetting("vox", "VOX",
                           RadioSettingValueList(LIST_10,
@@ -807,12 +808,12 @@ class KGUV8ERadio(chirp_common.CloneModeRadio,
         rs = RadioSetting("rpt_mode", "Radio Mode",
                           RadioSettingValueList(RPTMODE_LIST,
                                                 current_index=_settings.
-                                                             rpt_mode))
+                                                rpt_mode))
         cfg_grp.append(rs)
         rs = RadioSetting("rpt_set", "Repeater Setting",
                           RadioSettingValueList(RPTSET_LIST,
                                                 current_index=_settings.
-                                                            rpt_set))
+                                                rpt_set))
         cfg_grp.append(rs)
         rs = RadioSetting("rpt_spk", "Repeater Mode Speaker",
                           RadioSettingValueBoolean(_settings.rpt_spk))
@@ -823,12 +824,12 @@ class KGUV8ERadio(chirp_common.CloneModeRadio,
         rs = RadioSetting("dtmf_tx_time", "DTMF Tx Duration",
                           RadioSettingValueList(DTMF_TIMES,
                                                 current_index=_settings.
-                                                           dtmf_tx_time))
+                                                dtmf_tx_time))
         cfg_grp.append(rs)
         rs = RadioSetting("dtmf_interval", "DTMF Interval",
                           RadioSettingValueList(DTMF_TIMES,
                                                 current_index=_settings.
-                                                           dtmf_interval))
+                                                dtmf_interval))
         cfg_grp.append(rs)
         rs = RadioSetting("alert", "Alert Tone",
                           RadioSettingValueList(ALERTS_LIST,
@@ -840,7 +841,7 @@ class KGUV8ERadio(chirp_common.CloneModeRadio,
         rs = RadioSetting("rpt_hold", "Repeater Hold Time",
                           RadioSettingValueList(HOLD_TIMES,
                                                 current_index=_settings.
-                                                           rpt_hold))
+                                                rpt_hold))
         cfg_grp.append(rs)
         rs = RadioSetting("scan_det", "Scan DET",
                           RadioSettingValueBoolean(_settings.scan_det))
@@ -852,7 +853,7 @@ class KGUV8ERadio(chirp_common.CloneModeRadio,
         rs = RadioSetting("smuteset", "SubFreq Mute",
                           RadioSettingValueList(SMUTESET_LIST,
                                                 current_index=_settings.
-                                                              smuteset))
+                                                smuteset))
         cfg_grp.append(rs)
 
         #
@@ -1130,4 +1131,5 @@ class KGUV8ERadio(chirp_common.CloneModeRadio,
                     raise
 
     def _is_freq(self, element):
-        return "rxfreq" in element.get_name() or "txoffset" in element.get_name() or "rx_start" in element.get_name() or "rx_stop" in element.get_name() or "tx_start" in element.get_name() or "tx_stop" in element.get_name()
+        return "rxfreq" in element.get_name() or "txoffset" in element.get_name() or "rx_start" in element.get_name(
+        ) or "rx_stop" in element.get_name() or "tx_start" in element.get_name() or "tx_stop" in element.get_name()
