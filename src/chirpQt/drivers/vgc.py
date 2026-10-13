@@ -584,7 +584,7 @@ class VGCStyleRadio(chirp_common.CloneModeRadio,
     _gen2_range = (480000000, 520000000)
     _upper = 499
     MODEL = ""
-    IDENT = ""
+    IDENT: str | bytes = ""
 
     @classmethod
     def get_prompts(cls):

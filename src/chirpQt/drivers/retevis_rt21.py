@@ -15,6 +15,7 @@
 
 import struct
 import logging
+from typing import Sequence
 
 from chirpQt import (
     bitwise,
@@ -755,7 +756,8 @@ class RT21Radio(chirp_common.CloneModeRadio):
     BLOCK_SIZE = 0x10
     BLOCK_SIZE_UP = 0x10
 
-    DTCS_CODES = sorted(chirp_common.DTCS_CODES + (17, 50, 645))
+    DTCS_CODES: Sequence[int] = sorted(chirp_common.DTCS_CODES +
+                                       (17, 50, 645))
     POWER_LEVELS = [chirp_common.PowerLevel("High", watts=2.50),
                     chirp_common.PowerLevel("Low", watts=1.00)]
 
@@ -764,8 +766,8 @@ class RT21Radio(chirp_common.CloneModeRadio):
     _magic = b"PRMZUNE"
     _fingerprint = [b"P3207s\xF8\xFF", ]
     _upper = 16
-    _mem_params = (_upper,  # number of channels
-                   )
+    _mem_params: tuple[int, ...] = (_upper,  # number of channels
+                                    )
     _ack_1st_block = True
     _skipflags = True
     _reserved = False

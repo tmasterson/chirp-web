@@ -18,14 +18,12 @@ import threading
 
 from chirpQt import chirp_common, errors
 from chirpQt.sources import base
-from chirpQt.wxui import config
 
-from suds.client import Client
-from suds import WebFault
-from suds.plugin import MessagePlugin
+from suds.client import Client  # type: ignore[import-untyped]
+from suds import WebFault  # type: ignore[import-untyped]
+from suds.plugin import MessagePlugin  # type: ignore[import-untyped]
 
 LOG = logging.getLogger(__name__)
-CONF = config.get()
 
 MODES = {
     "FM":     "FM",
@@ -38,8 +36,8 @@ MODES = {
     "DMR":    "DMR",
 }
 
-CA_COUNTIES = []
-CA_PROVINCES = {}
+CA_COUNTIES: list[list[int | str]] = []
+CA_PROVINCES: dict[str, int] = {}
 logging.getLogger('suds').setLevel(logging.WARNING)
 
 

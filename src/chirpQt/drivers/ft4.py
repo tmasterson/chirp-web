@@ -23,6 +23,7 @@ least the FT-4X, FT-4V, FT-65, and FT-25. This driver will not work with older
 Yaesu models.
 """
 import logging
+from typing import Any, Sequence
 import struct
 import copy
 from chirpQt import chirp_common, directory, memmap, bitwise, errors, util
@@ -580,7 +581,7 @@ TONE_DICT = {}          # encode sql_type.
 CROSS_DICT = {}         # encode sql_type.
 
 for sql_type in reversed(range(0, len(RADIO_TMODES))):
-    sql_type_row: list = RADIO_TMODES[sql_type]
+    sql_type_row: Sequence[Any] = RADIO_TMODES[sql_type]
     for decode_row in sql_type_row[0]:
         suppress = None
         if len(decode_row) == 3:
@@ -694,7 +695,7 @@ class YaesuSC35GenericRadio(chirp_common.CloneModeRadio,
     MODEL = "SCU-35Generic"  # No radio directly uses the base class
     BAUD_RATE = 9600
     MAX_MEM_SLOT = 200
-    DUPLEX_OFF_VIA_OFFSET = False
+    DUPLEX_OFF_VIA_OFFSET: bool | list[tuple[str, int] | None] = False
 
     # These settings are common to all radios in this family.
     _valid_chars = chirp_common.CHARSET_ASCII

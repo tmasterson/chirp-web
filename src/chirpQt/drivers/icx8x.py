@@ -14,6 +14,7 @@
 # along with this program.  If not, see <http://www.gnu.org/licenses/>.
 
 import logging
+from typing import Any
 
 from chirpQt import bitwise
 from chirpQt.drivers import icf
@@ -95,7 +96,7 @@ class ICx8xRadio(icf.IcomCloneModeRadio, chirp_common.IcomDstarSupport):
     _can_hispeed = False
     _double_ident = True
 
-    _memories = []
+    _memories: list[Any] = []
 
     _ranges = [(0x0000, 0x1340, 32),
                (0x1340, 0x1360, 16),

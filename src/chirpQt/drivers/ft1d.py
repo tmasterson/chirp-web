@@ -711,7 +711,7 @@ class FT1Radio(yaesu_clone.YaesuCloneModeRadio):
     VARIANT = "R"
     FORMATS = [directory.register_format('FT1D ADMS-6', '*.ft1d')]
     class_specials = SPECIALS
-    _model = b"AH44M"
+    _model: str | bytes = b"AH44M"
     _memsize = 130507
     _block_lengths = [10, 130497]
     _block_size = 32

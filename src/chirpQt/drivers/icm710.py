@@ -22,7 +22,7 @@ from chirpQt.drivers import icf
 LOG = logging.getLogger(__name__)
 
 BAUDS = [4800]
-POWER_LEVELS = []
+POWER_LEVELS: list[chirp_common.PowerLevel] = []
 DUPLEX_MODES = ['', 'split', 'off']
 # do not reorder this list
 # MODULATION_MODES = ["USB", "R3E", "AM", "LSB", "AFS", "FSK", "CW"]

@@ -60,7 +60,8 @@ class KGUVD1PRadio(chirp_common.CloneModeRadio,
     MODEL = "KG-UVD1P"
     _model = b"KG669V"
 
-    _querymodel = (b"HiWOUXUN\x02", b"PROGUV6X\x02")
+    _querymodel: bytes | tuple[bytes, bytes] = \
+        (b"HiWOUXUN\x02", b"PROGUV6X\x02")
 
     CHARSET = list("0123456789") + \
         [chr(x + ord("A")) for x in range(0, 26)] + list("?+-")

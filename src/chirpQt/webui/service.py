@@ -2,6 +2,7 @@
 
 import base64
 import binascii
+import copy
 import logging
 import re
 import tempfile
@@ -9,6 +10,7 @@ import threading
 import uuid
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
+from typing import TypedDict
 
 from chirpQt import chirp_common, directory, settings
 
@@ -22,6 +24,11 @@ MEMORY_FIELDS = (
         'ctone', 'dtcs', 'rx_dtcs', 'dtcs_polarity', 'cross_mode',
         'tuning_step', 'skip', 'comment',
 )
+
+
+class RejectedSourceResult(TypedDict):
+    index: int
+    reason: str
 
 
 class WebServiceError(Exception):
@@ -44,6 +51,7 @@ class DriverSession:
         self.temp_path = None
         self.dirty = False
         self.active_job = None
+        self.source_results = {}
 
     def _require_radio(self):
         if self.radio is None:
@@ -464,6 +472,109 @@ class DriverSession:
             return {'memory': self._memory_dict(radio.get_memory(number)),
                     'warnings': [str(warning) for warning in warnings]}
 
+    def remember_source_results(self, memories):
+        """Keep query results server-side for selected imports."""
+        token = str(uuid.uuid4())
+        with self.lock:
+            self.source_results.clear()
+            self.source_results[token] = memories
+        return token
+
+    def import_source_results(self, token: str, selected: list[int]):
+        """Copy selected source memories into empty slots in the open image."""
+        with self.lock:
+            self._ensure_idle()
+            radio = self._require_radio()
+            source_memories = self.source_results.get(token)
+            if source_memories is None:
+                raise WebServiceError('Source results have expired.', 404)
+            if not selected:
+                raise WebServiceError('Select at least one repeater.', 422)
+            if len(selected) != len(set(selected)):
+                raise WebServiceError(
+                        'A source result can only be selected once.', 422)
+            if any(index < 0 or index >= len(source_memories)
+                   for index in selected):
+                raise WebServiceError(
+                        'A selected source result was not found.', 422)
+
+            low, high = radio.get_features().memory_bounds
+            empty_slots = [
+                number for number in range(low, high + 1)
+                if radio.get_memory(number).empty
+            ]
+            prepared: list[
+                tuple[
+                    int,
+                    chirp_common.Memory,
+                    list[chirp_common.ValidationWarning],
+                ]
+            ] = []
+            rejected: list[RejectedSourceResult] = []
+            for index in selected:
+                memory = copy.deepcopy(source_memories[index])
+                if len(prepared) >= len(empty_slots):
+                    break
+                memory.number = empty_slots[len(prepared)]
+                memory.empty = False
+                warnings, errors = chirp_common.split_validation_msgs(
+                        radio.validate_memory(memory))
+                if errors:
+                    rejected.append({
+                        'index': index,
+                        'reason': '; '.join(str(error) for error in errors),
+                    })
+                    continue
+                prepared.append((index, memory, warnings))
+
+            if not prepared:
+                if not empty_slots:
+                    raise WebServiceError(
+                            'The open image has no empty memory slots.', 409)
+                detail = '; '.join(item['reason'] for item in rejected)
+                raise WebServiceError(
+                        detail or 'No selected repeaters can be imported.',
+                        422)
+            if len(prepared) < len(selected) - len(rejected):
+                raise WebServiceError(
+                        'The open image does not have enough empty memory '
+                        'slots for the selected repeaters.', 409)
+
+            backups = {
+                memory.number: copy.deepcopy(radio.get_memory(memory.number))
+                for _, memory, _ in prepared
+            }
+            written = []
+            try:
+                for _, memory, _ in prepared:
+                    written.append(memory.number)
+                    radio.set_memory(memory)
+            except Exception as exc:
+                for number in written:
+                    try:
+                        radio.set_memory(backups[number])
+                    except Exception:
+                        LOG.exception(
+                                'Failed to restore memory %i after import',
+                                number)
+                raise WebServiceError(
+                        'The radio driver could not import the selected '
+                        'repeaters.', 422) from exc
+
+            del self.source_results[token]
+            self.dirty = True
+            warnings = [
+                str(warning)
+                for _, _, item_warnings in prepared
+                for warning in item_warnings
+            ]
+            return {
+                'imported': len(prepared),
+                'start': prepared[0][1].number,
+                'rejected': rejected,
+                'warnings': warnings,
+            }
+
     @staticmethod
     def _memory_dict(memory):
         result = {field: getattr(memory, field, None)
@@ -523,7 +634,7 @@ class TransferManager:
         self.executor = ThreadPoolExecutor(
                 max_workers=1, thread_name_prefix='chirpqt-radio')
         self.lock = threading.Lock()
-        self.jobs = {}
+        self.jobs: dict[str, dict[str, object]] = {}
 
     @staticmethod
     def radios():

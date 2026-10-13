@@ -813,10 +813,10 @@ class IcomCloneModeRadio(chirp_common.CloneModeRadio):
     BAUDRATE = 9600
     FORMATS = [directory.register_format('Icom ICF', '*.icf')]
 
-    _model = "\x00\x00\x00\x00"  # 4-byte model string
-    _endframe = ""               # Model-unique ending frame
+    _model: str | bytes = "\x00\x00\x00\x00"  # 4-byte model string
+    _endframe: str | bytes = ""  # Model-unique ending frame
     _ignore_clone_ok = False
-    _ranges = []                 # Ranges of the mmap to send to the radio
+    _ranges: list[tuple[int, ...]] = []  # Ranges of the mmap to send to the radio
     _num_banks = 10              # Most simple Icoms have 10 banks, A-J
     _bank_index_bounds = (0, 99)
     _bank_class = IcomBank

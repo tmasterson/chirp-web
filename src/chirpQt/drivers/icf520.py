@@ -18,6 +18,7 @@ Icom IC-F621 Land Mobile Radio
 # along with this program.  If not, see <http://www.gnu.org/licenses/>.
 
 import logging
+from typing import Any
 
 from chirpQt import chirp_common
 from chirpQt import directory
@@ -667,7 +668,7 @@ class ICF621_2Radio(icf.IcomCloneModeRadio):
     # IC-F521 _valid_bands = [(136000000, 174000000)]
     _valid_bands = [(440000000, 490000000)]
 
-    _memories = {}
+    _memories: dict[Any, Any] = {}
 
     def get_features(self):
         rf = chirp_common.RadioFeatures()

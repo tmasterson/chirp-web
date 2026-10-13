@@ -7,6 +7,8 @@ const state = {
   editing: null,
   settings: null,
   settingValues: new Map(),
+  sources: [],
+  sourceResults: null,
 };
 
 const $ = (selector) => document.querySelector(selector);
@@ -43,6 +45,11 @@ function setBusy(busy) {
   $('#radioModel').disabled = busy;
   $('#serialPort').disabled = busy;
   $('#refreshPorts').disabled = busy;
+  $('#sourceName').disabled = busy;
+  $('#sourceParams').disabled = busy;
+  $('#querySource').disabled = busy;
+  $('#importSources').disabled = busy || !state.sourceResults ||
+    !selectedSourceIndexes().length || !state.session;
   $('#loadSettings').disabled = busy || !state.session?.has_settings;
   $('#applySettings').disabled = busy || !hasChangedSettings();
   const [low, high] = state.session?.memory_bounds || [0, 0];
@@ -82,6 +89,87 @@ async function loadPorts() {
   }
 }
 
+async function loadSources() {
+  state.sources = await api('/api/sources');
+  const select = $('#sourceName');
+  select.replaceChildren();
+  state.sources.forEach((source) => {
+    const option = document.createElement('option');
+    option.value = source.id;
+    option.textContent = source.name;
+    select.append(option);
+  });
+  if (!state.sources.length) {
+    select.add(new Option('No network sources available', ''));
+    return;
+  }
+  updateSourceExample();
+}
+
+function updateSourceExample() {
+  const source = state.sources.find((item) => item.id === $('#sourceName').value);
+  $('#sourceHelp').textContent = source?.help || '';
+  $('#sourceParams').value = JSON.stringify(source?.example || {}, null, 2);
+  state.sourceResults = null;
+  $('#sourceResults').hidden = true;
+  $('#sourceRows').replaceChildren();
+  $('#selectAllSources').checked = false;
+  $('#sourceStatus').textContent = 'Enter search parameters and search this source.';
+  updateImportButton();
+}
+
+function selectedSourceIndexes() {
+  return [...$('#sourceRows').querySelectorAll('input[type="checkbox"]:checked')]
+    .map((checkbox) => Number(checkbox.value));
+}
+
+function updateImportButton() {
+  const selectedCount = selectedSourceIndexes().length;
+  $('#importSources').disabled = state.busy ||
+    !state.sourceResults || !selectedCount || selectedCount > 1000 ||
+    !state.session;
+  if (selectedCount > 1000) {
+    $('#sourceStatus').textContent = 'Select no more than 1,000 repeaters at once.';
+  } else if (state.sourceResults) {
+    $('#sourceStatus').textContent =
+      `${state.sourceResults.count.toLocaleString()} repeaters found from ${state.sourceResults.source}.`;
+  }
+}
+
+function renderSourceResults(result) {
+  const rows = $('#sourceRows');
+  rows.replaceChildren();
+  result.memories.forEach((memory, index) => {
+    const row = document.createElement('tr');
+    const selectCell = document.createElement('td');
+    const checkbox = document.createElement('input');
+    checkbox.type = 'checkbox';
+    checkbox.value = String(index);
+    checkbox.addEventListener('change', updateImportButton);
+    selectCell.append(checkbox);
+    row.append(selectCell);
+    [
+      [memory.name || '—', 'channel-name'],
+      [formatFrequency(memory.freq), 'frequency'],
+      [memory.mode || '—'],
+      [memory.duplex ? `${memory.duplex} ${formatFrequency(memory.offset)}` : '—'],
+    ].forEach(([value, className]) => {
+      const cell = document.createElement('td');
+      cell.textContent = value;
+      if (className) cell.className = className;
+      row.append(cell);
+    });
+    rows.append(row);
+  });
+  if (!result.memories.length) {
+    rows.innerHTML = '<tr class="empty-state"><td colspan="5">No repeaters found.</td></tr>';
+  }
+  $('#selectAllSources').checked = false;
+  $('#sourceResults').hidden = false;
+  $('#sourceStatus').textContent = `${result.count.toLocaleString()} repeaters found from ${result.source}.`;
+  updateImportButton();
+}
+
 function renderSession() {
   const details = $('#sessionInfo');
   const saveButton = $('#saveButton');
@@ -95,6 +183,7 @@ function renderSession() {
     $('#pageLabel').textContent = '—';
     $('#loadSettings').disabled = true;
     $('#applySettings').disabled = true;
+    updateImportButton();
     setBusy(false);
     return;
   }
@@ -106,6 +195,7 @@ function renderSession() {
   $('#channelCount').textContent = `${state.total.toLocaleString()} channels`;
   $('#loadSettings').disabled = state.busy || !state.session.has_settings;
   $('#applySettings').disabled = state.busy || !hasChangedSettings();
+  updateImportButton();
 }
 
 function formatFrequency(value) {
@@ -330,6 +420,80 @@ $('#refreshPorts').addEventListener('click', async () => {
     showNotice('Serial port list refreshed.');
   } catch (error) {
     showNotice(error.message, true);
+  }
+});
+
+$('#sourceName').addEventListener('change', updateSourceExample);
+$('#querySource').addEventListener('click', async () => {
+  let params;
+  try {
+    params = JSON.parse($('#sourceParams').value);
+    if (!params || typeof params !== 'object' || Array.isArray(params)) {
+      throw new Error('Search parameters must be a JSON object.');
+    }
+  } catch (error) {
+    showNotice(error.message.startsWith('Search parameters')
+      ? error.message
+      : 'Enter valid JSON search parameters.', true);
+    return;
+  }
+  try {
+    setBusy(true);
+    $('#sourceStatus').textContent = 'Searching the network source…';
+    const result = await api(`/api/sources/${encodeURIComponent($('#sourceName').value)}/query`, {
+      method: 'POST',
+      body: JSON.stringify({ params }),
+    });
+    state.sourceResults = result;
+    renderSourceResults(result);
+    showNotice(`${result.count.toLocaleString()} repeaters found.`);
+  } catch (error) {
+    $('#sourceStatus').textContent = error.message;
+    showNotice(error.message, true);
+  } finally {
+    setBusy(false);
+    updateImportButton();
+  }
+});
+
+$('#selectAllSources').addEventListener('change', (event) => {
+  $('#sourceRows').querySelectorAll('input[type="checkbox"]').forEach((checkbox) => {
+    checkbox.checked = event.target.checked;
+  });
+  updateImportButton();
+});
+
+$('#importSources').addEventListener('click', async () => {
+  if (!state.sourceResults) return;
+  const selected = selectedSourceIndexes();
+  if (!selected.length) return;
+  try {
+    setBusy(true);
+    const result = await api('/api/sources/import', {
+      method: 'POST',
+      body: JSON.stringify({
+        query_id: state.sourceResults.query_id,
+        selected,
+      }),
+    });
+    await refreshSession();
+    state.start = result.start;
+    await loadMemories();
+    state.sourceResults = null;
+    $('#sourceResults').hidden = true;
+    $('#sourceStatus').textContent = `${result.imported} repeater${result.imported === 1 ? '' : 's'} imported.`;
+    const skipped = result.rejected.length
+      ? ` ${result.rejected.length} incompatible repeater${result.rejected.length === 1 ? '' : 's'} skipped: ${result.rejected.slice(0, 3).map((item) => `#${item.index + 1}: ${item.reason}`).join('; ')}.`
+      : '';
+    const warningText = result.warnings.length
+      ? ` Driver warnings: ${result.warnings.join('; ')}`
+      : '';
+    showNotice(`${result.imported} repeater${result.imported === 1 ? '' : 's'} added to empty channels.${skipped}${warningText}`);
+  } catch (error) {
+    showNotice(error.message, true);
+  } finally {
+    setBusy(false);
+    renderSession();
   }
 });
 
@@ -601,7 +765,7 @@ $('#nextPage').addEventListener('click', async () => {
 
 async function initialize() {
   try {
-    await Promise.all([loadRadios(), loadPorts()]);
+    await Promise.all([loadRadios(), loadPorts(), loadSources()]);
     try {
       await refreshSession();
       renderSession();

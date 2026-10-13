@@ -2,8 +2,6 @@
 
 import importlib
 import json
-import sys
-import types
 from types import SimpleNamespace
 
 from chirpQt import chirp_common
@@ -12,36 +10,12 @@ import pytest
 
 import requests
 
-_has_wx = 'wx' in sys.modules
-sys.modules.setdefault('wx', SimpleNamespace(
-    GetTranslation=lambda message: message))
-_added_wxui = 'chirpQt.wxui' not in sys.modules
-if 'chirpQt.wxui' not in sys.modules:
-    wxui = types.ModuleType('chirpQt.wxui')
-    config = types.ModuleType('chirpQt.wxui.config')
-    config.get = lambda: {}
-    fips = types.ModuleType('chirpQt.wxui.fips')
-    fips.FIPS_STATES = {}
-    wxui.config = config
-    wxui.fips = fips
-    sys.modules.update({
-        'chirpQt.wxui': wxui,
-        'chirpQt.wxui.config': config,
-        'chirpQt.wxui.fips': fips,
-    })
-
 base = importlib.import_module('chirpQt.sources.base')
 dmrmarc = importlib.import_module('chirpQt.sources.dmrmarc')
 przemienniki_eu = importlib.import_module('chirpQt.sources.przemienniki_eu')
 przemienniki_net = importlib.import_module('chirpQt.sources.przemienniki_net')
 radioreference = importlib.import_module('chirpQt.sources.radioreference')
 repeaterbook = importlib.import_module('chirpQt.sources.repeaterbook')
-if not _has_wx:
-    sys.modules.pop('wx', None)
-if _added_wxui:
-    for module_name in ('chirpQt.wxui', 'chirpQt.wxui.config',
-                        'chirpQt.wxui.fips'):
-        sys.modules.pop(module_name, None)
 
 
 class FakeStatus:

@@ -15,6 +15,7 @@
 
 import struct
 import logging
+from typing import Sequence
 
 from chirpQt import (
     bitwise,
@@ -305,8 +306,8 @@ class BFT8Radio(chirp_common.CloneModeRadio):
     NAME_LENGTH = 0
     VALID_CHARS = ""
     CH_OFFSET = False
-    SKIP_VALUES = []
-    DTCS_CODES = sorted(chirp_common.DTCS_CODES)
+    SKIP_VALUES: list[str] = []
+    DTCS_CODES: Sequence[int] = sorted(chirp_common.DTCS_CODES)
     DUPLEXES = ["", "-", "+", "split", "off"]
 
     POWER_LEVELS = [chirp_common.PowerLevel("High", watts=2.00),

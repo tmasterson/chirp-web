@@ -89,7 +89,7 @@ class WP970I(bfc.BaofengCommonHT):
     MODEL = "WP970I"
 
     _tri_band = False
-    _fileid = []
+    _fileid: list[str] = []
     _magic = [MSTRING_WP970I, ]
     _magic_response_length = 8
     _fw_ver_start = 0x1EF0

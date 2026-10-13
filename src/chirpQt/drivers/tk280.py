@@ -787,15 +787,15 @@ class KenwoodTKx80(chirp_common.CloneModeRadio):
     BAUD_RATE = 9600
     _memsize = MEM_SIZE
     NAME_LENGTH = 8
-    _range = []
+    _range: list[tuple[int, int]] = []
     _upper = 250
-    _steps = chirp_common.COMMON_TUNING_STEPS
+    _steps: tuple[float, ...] = chirp_common.COMMON_TUNING_STEPS
     # Ver1 and Ver2 radios use a different multiplier for in-memory frequency
     _freqmult = 10
     VARIANT = ""
     MODEL = ""
     FORMATS = [directory.register_format('Kenwood KPG-49D', '.dat')]
-    POWER_LEVELS = []
+    POWER_LEVELS: list[chirp_common.PowerLevel] = []
 
     def load_mmap(self, filename):
         if filename.lower().endswith('.dat'):

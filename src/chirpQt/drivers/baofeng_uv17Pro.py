@@ -225,7 +225,7 @@ class UV17Pro(bfc.BaofengCommonHT):
     _has_savemode = True
 
     _tri_band = True
-    _fileid = []
+    _fileid: list[bytes] = []
     _magic = MSTRING_UV17L
     _fingerprint = b"\x06"
     _magics = [(b"\x46", 16),
@@ -247,7 +247,7 @@ class UV17Pro(bfc.BaofengCommonHT):
     _scode_offset = 0
     _encrsym = 1
     _has_voice = True
-    _mem_positions = (0x8080, 0x80A0, 0x8280)
+    _mem_positions: tuple[int, ...] = (0x8080, 0x80A0, 0x8280)
 
     MODES = ["NFM", "FM"]
     VALID_CHARS = chirp_common.CHARSET_ALPHANUMERIC + \
@@ -255,7 +255,7 @@ class UV17Pro(bfc.BaofengCommonHT):
     LENGTH_NAME = 12
     SKIP_VALUES = ["", "S"]
     DTCS_CODES = tuple(sorted(chirp_common.DTCS_CODES + (645,)))
-    RXTX_CODES = ('Off', )
+    RXTX_CODES: tuple[str, ...] = ('Off', )
     LIST_PW_SAVEMODE = ["Off", "On"]
     for code in chirp_common.TONES:
         RXTX_CODES = (RXTX_CODES + (str(code), ))
@@ -464,13 +464,13 @@ class UV17Pro(bfc.BaofengCommonHT):
              'Please save an unedited copy of your first successful\n'
              'download to a CHIRP Radio Images(*.img) file.'
              )
-        rp.pre_download = (
+        rp.pre_download = _(
             "Follow these instructions to download your info:\n"
             "1 - Turn off your radio\n"
             "2 - Connect your interface cable\n"
             "3 - Turn on your radio\n"
             "4 - Do the download of your radio data\n")
-        rp.pre_upload = (
+        rp.pre_upload = _(
             "Follow this instructions to upload your info:\n"
             "1 - Turn off your radio\n"
             "2 - Connect your interface cable\n"
@@ -1186,11 +1186,11 @@ class UV17Pro(bfc.BaofengCommonHT):
             if chirp_common.in_range(mem.freq,
                                      [self._airband]) and mem.mode != 'AM':
                 msgs.append(chirp_common.ValidationWarning(
-                    ('Frequency in this range requires AM mode')))
+                    _('Frequency in this range requires AM mode')))
             if not chirp_common.in_range(mem.freq,
                                          [self._airband]) and mem.mode == 'AM':
                 msgs.append(chirp_common.ValidationWarning(
-                    ('Frequency in this range must not be AM mode')))
+                    _('Frequency in this range must not be AM mode')))
 
         return msgs + super().validate_memory(mem)
 

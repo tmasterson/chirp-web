@@ -1,4 +1,5 @@
 import datetime
+from gettext import gettext as _
 import glob
 import json
 import logging
@@ -6,38 +7,19 @@ import math
 import os
 
 import requests
-import wx
 
 from chirpQt import chirp_common
 from chirpQt import errors
 from chirpQt import platform as chirp_platform
 from chirpQt.sources import base
-from chirpQt.wxui import fips
 
 LOG = logging.getLogger(__name__)
-_ = wx.GetTranslation
 
 NA_COUNTRIES = [
     'United States',
     'Canada',
     'Mexico',
 ]
-MEXICO_STATES = [
-    "Aguascalientes", "Baja California Sur", "Baja California",
-    "Campeche", "Chiapas", "Chihuahua", "Coahuila", "Colima",
-    "Durango", "Guanajuato", "Guerrero", "Hidalgo", "Jalisco",
-    "Mexico City", "Mexico", "Michoacán", "Morelos", "Nayarit",
-    "Nuevo Leon", "Puebla", "Queretaro", "Quintana Roo", "San Luis Potosi",
-    "Sinaloa", "Sonora", "Tabasco", "Tamaulipas", "Tlaxcala", "Veracruz",
-    "Yucatan", "Zacatecas",
-]
-STATES = {
-    'United States': [s for s, i in fips.FIPS_STATES.items()
-                      if isinstance(i, int)],
-    'Canada': [s for s, i in fips.FIPS_STATES.items()
-               if isinstance(i, str)],
-    'Mexico': MEXICO_STATES,
-}
 MODES = ['FM', 'DV', 'DMR', 'DN']
 
 
@@ -117,7 +99,7 @@ class RepeaterBook(base.NetworkResultRadio):
             export = 'export.php'
         else:
             export = 'exportROW.php'
-        if country in STATES:
+        if country in NA_COUNTRIES:
             params['state'] = state
 
         try:

@@ -232,7 +232,7 @@ class YaesuCloneModeRadio(chirp_common.CloneModeRadio):
     _block_size = 8
 
     VENDOR = "Yaesu"
-    _model = b"ABCDE"
+    _model: str | bytes = b"ABCDE"
 
     @classmethod
     def get_prompts(cls):

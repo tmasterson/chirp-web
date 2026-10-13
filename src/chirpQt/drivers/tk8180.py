@@ -327,7 +327,7 @@ PORTABLE_BUTTON_FUNCTIONS = {
     'Low TX Power': 0x28,
 }
 # These are only available on the mobile transceiver
-MOBILE_BUTTON_FUNCTIONS = {
+MOBILE_BUTTON_FUNCTIONS: dict[str, int] = {
 }
 KNOB_MODE = {
     'None': 0xFF,

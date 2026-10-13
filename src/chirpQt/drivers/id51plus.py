@@ -14,6 +14,7 @@
 # along with this program.  If not, see <http://www.gnu.org/licenses/>.
 
 import logging
+from typing import Any
 
 from chirpQt.drivers import id31
 from chirpQt import directory, bitwise
@@ -172,8 +173,8 @@ class ID51PLUSRadio(id31.ID31Radio):
 @directory.register
 class ID51PLUS2Radio(ID51PLUSRadio):
     MODEL = 'ID-51 Plus2'
-    _model = b'\x33\x90\x00\x03'
-    _endframe = b'Icom Inc.DA'
+    _model: Any = b'\x33\x90\x00\x03'
+    _endframe: Any = b'Icom Inc.DA'
 
     _raw_frames = True
     _highbit_flip = True

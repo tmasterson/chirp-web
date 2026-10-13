@@ -1034,7 +1034,7 @@ class TDH8(chirp_common.CloneModeRadio):
     _ranges_main = [(0x0000, 0x1eef)]
     _idents = [TD_H8]
     _txbands = [(136000000, 175000000), (400000000, 521000000)]
-    _rxbands = []
+    _rxbands: list[tuple[int, int]] = []
     _aux_block = True
     _tri_power = True
     _gmrs = False

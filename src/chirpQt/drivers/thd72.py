@@ -230,7 +230,7 @@ class THD72Radio(chirp_common.CloneModeRadio):
     mem_upper_limit = 1022
     _memsize = 65536
     _model = ""  # FIXME: REMOVE
-    _dirty_blocks = []
+    _dirty_blocks: list[int] = []
 
     _LCD_CONTRAST = ["Level %d" % x for x in range(1, 16)]
     _LAMP_CONTROL = ["Manual", "Auto"]

@@ -97,8 +97,8 @@ def detected_by(manager_class):
     return wrapper
 
 
-DRV_TO_RADIO = {}
-RADIO_TO_DRV = {}
+DRV_TO_RADIO: dict[str, type[chirp_common.Radio]] = {}
+RADIO_TO_DRV: dict[type[chirp_common.Radio], str] = {}
 AUX_FORMATS: set[tuple] = set()
 
 

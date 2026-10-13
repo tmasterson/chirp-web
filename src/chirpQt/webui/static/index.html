@@ -67,6 +67,41 @@
         </article>
       </section>
 
+      <section class="sources panel" aria-label="Network repeater sources">
+        <div class="channels-heading">
+          <div>
+            <div class="eyebrow">NETWORK SOURCES</div>
+            <h2>Find and import repeaters</h2>
+            <p>Search a repeater database, select results, and add them to empty channels in the open image.</p>
+          </div>
+        </div>
+        <div class="source-search">
+          <div>
+            <label class="field-label" for="sourceName">Repeater source</label>
+            <select id="sourceName"><option value="">Loading sources…</option></select>
+            <p id="sourceHelp" class="source-help"></p>
+          </div>
+          <label class="source-params-label" for="sourceParams">Search parameters (JSON)</label>
+          <textarea id="sourceParams" rows="7" spellcheck="false">{}</textarea>
+          <div class="source-actions">
+            <span id="sourceStatus" role="status">Choose a source and enter its search parameters.</span>
+            <button id="querySource" class="button button-secondary" type="button">Search source</button>
+          </div>
+        </div>
+        <div id="sourceResults" class="source-results" hidden>
+          <div class="source-results-heading">
+            <label><input id="selectAllSources" type="checkbox"> Select all results</label>
+            <button id="importSources" class="button button-primary" type="button" disabled>Import selected</button>
+          </div>
+          <div class="table-wrap">
+            <table>
+              <thead><tr><th></th><th>NAME</th><th>FREQUENCY</th><th>MODE</th><th>SHIFT</th></tr></thead>
+              <tbody id="sourceRows"></tbody>
+            </table>
+          </div>
+        </div>
+      </section>
+
       <section class="channels panel">
         <div class="channels-heading">
           <div>

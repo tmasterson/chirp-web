@@ -13,6 +13,8 @@
 # You should have received a copy of the GNU General Public License
 # along with this program.  If not, see <http://www.gnu.org/licenses/>.
 
+from typing import Any
+
 from chirpQt.drivers import icf
 from chirpQt import chirp_common, directory, bitwise
 
@@ -134,7 +136,7 @@ class IC208Radio(icf.IcomCloneModeRadio):
     _endframe = "Icom Inc\x2e30"
     _can_hispeed = True
 
-    _memories = []
+    _memories: list[Any] = []
 
     _ranges = [(0x0000, 0x2600, 32)]
 

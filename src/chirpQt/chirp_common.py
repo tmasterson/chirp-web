@@ -1344,7 +1344,7 @@ class Radio(Alias):
     WANTS_DTR = True
     # Whether or not we should assert RTS when opening the serial port
     WANTS_RTS = True
-    ALIASES: list[Alias] = []
+    ALIASES: list[type[Alias]] = []
     NEEDS_COMPAT_SERIAL = False
     FORMATS: list[str] = []
 

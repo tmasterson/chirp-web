@@ -17,7 +17,7 @@
 
 # import inspect
 import logging
-from typing import Any
+from typing import Any, Iterable, Protocol
 
 from chirpQt.errors import (
         # ImmutableValueError,
@@ -41,6 +41,14 @@ from chirpQt.utils.powerlevel import PowerLevel
 
 LOG = logging.getLogger(__name__)
 SEPCHAR: str = ','
+
+
+class _ExtraSetting(Protocol):
+    """The setting interface used when dumping memory extras."""
+
+    value: object
+
+    def get_name(self) -> str: ...
 
 
 class Memory:
@@ -75,7 +83,7 @@ class Memory:
 
     # A RadioSettingGroup of additional settings supported by the radio,
     # or an empty list if none
-    extra: list[object] = []
+    extra: Iterable[_ExtraSetting] = []
 
     def __init__(self, number: int = 0, empty: bool = False,
                  name: str = '', dv_mem: bool = False) -> None:
@@ -136,10 +144,10 @@ class Memory:
         """Get debug info."""
         if not isinstance(other, Memory):
             return NotImplemented
-        my_ident, my_vals = self.debug_dump()
-        my_vals = dict(my_vals)
-        om_ident, om_vals = other.debug_dump()
-        om_vals = dict(om_vals)
+        my_ident, my_dump = self.debug_dump()
+        my_vals = dict(my_dump)
+        om_ident, om_dump = other.debug_dump()
+        om_vals = dict(om_dump)
         diffs = []
         if my_ident != om_ident:
             diffs.append(f'ident={my_ident}{delim}{om_ident}')

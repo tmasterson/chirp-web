@@ -17,6 +17,7 @@
 
 import struct
 import logging
+from typing import Any
 
 from time import sleep
 from chirpQt.drivers import baofeng_common as bfc
@@ -674,7 +675,7 @@ class BTechMobileCommon(chirp_common.CloneModeRadio,
     _350_range = (350000000, 391000000)
     _upper = 199
     _magic = MSTRING
-    _fileid = []
+    _fileid: list[Any] = []
     _id2 = False
     btech3 = False
     _gmrs = False

@@ -254,7 +254,7 @@ class KenwoodD7Family(chirp_common.LiveRadio):
     _TONES = chirp_common.OLD_TONES
     _LOWER = 0
     _UPPER = 199
-    _BANDS = []
+    _BANDS: list[tuple[int, int]] = []
 
     _CALL_CHANS = ("VHF Call", "UHF Call")
     _SPECIAL_CHANS = ("L0", "U0",
@@ -453,7 +453,7 @@ class KenwoodD7Family(chirp_common.LiveRadio):
                            "8 digit NMEA", "9 digit NMEA", "6 digit Magellan",
                            "DGPS")}}
 
-    _PROGRAMMABLE_VFOS = (
+    _PROGRAMMABLE_VFOS: tuple[tuple[str, int, int, int], ...] = (
         ("Band A, 118 MHz Sub-Band", 1, 118, 135),
         ("Band A, VHF Sub-Band", 2, 136, 173),
         ("Band B, VHF Sub-Band", 3, 144, 147),
@@ -2170,7 +2170,7 @@ class TMD700Radio(KenwoodD7Family):
                 'map': (('31 Channels', '1'), ('61 Channels', '2'),
                         ('91 Channels', '3'), ('181 Channels', '4'))}}
 
-    _PROGRAMMABLE_VFOS = (
+    _PROGRAMMABLE_VFOS: tuple[tuple[str, int, int, int], ...] = (
         ("Band A 118 MHz Sub-Band", 1, 118, 135),
         ("Band A VHF Sub-Band", 2, 136, 199),
         ("Band B VHF Sub-Band", 3, 136, 174),

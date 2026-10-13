@@ -43,7 +43,7 @@ class FT817Radio(yaesu_clone.YaesuCloneModeRadio):
     # narrow modes has to be at end
     MODES = ["LSB", "USB", "CW", "CWR", "AM", "FM", "DIG", "PKT", "NCW",
              "NCWR", "NFM"]
-    TMODES = ["", "Tone", "TSQL", "DTCS"]
+    TMODES: list[str] | dict[int, str] = ["", "Tone", "TSQL", "DTCS"]
     STEPSFM = [5.0, 6.25, 10.0, 12.5, 15.0, 20.0, 25.0, 50.0]
     STEPSAM = [2.5, 5.0, 9.0, 10.0, 12.5, 25.0]
     STEPSSSB = [1.0, 2.5, 5.0]

@@ -138,6 +138,25 @@ footer { padding-top: 26px; color: #8a958d; text-align: center; font-size: 10px;
 .settings-actions { display: flex; justify-content: space-between; align-items: center; gap: 12px; margin-top: 16px; }
 .settings-changed { color: #8a5c14; font-size: 11px; }
 
+.sources { margin-bottom: 16px; padding: 22px 24px; }
+.sources .channels-heading { margin-bottom: 10px; }
+.sources .channels-heading p { max-width: 680px; margin: 8px 0 0; color: var(--muted); font-size: 12px; line-height: 1.5; }
+.source-search { display: grid; grid-template-columns: 1fr 1fr; gap: 10px 16px; align-items: start; }
+.source-help { margin: 7px 0 0; color: var(--muted); font-size: 10px; line-height: 1.4; }
+.source-params-label { color: #536158; font-size: 11px; font-weight: 600; }
+#sourceParams { grid-column: 2; grid-row: 2 / span 2; width: 100%; min-height: 110px; resize: vertical;
+  border: 1px solid #dbe3dd; border-radius: 6px; padding: 9px 10px; color: var(--ink);
+  background: #fff; font: 11px/1.5 "DM Mono", monospace; }
+#sourceParams:focus { border-color: #6bab83; outline: none; box-shadow: 0 0 0 3px #71b58c22; }
+.source-actions { display: flex; justify-content: space-between; align-items: center; gap: 12px; }
+.source-actions span { color: var(--muted); font-size: 10px; }
+.source-results { margin-top: 18px; }
+.source-results-heading { display: flex; justify-content: space-between; align-items: center; margin-bottom: 7px;
+  color: #536158; font-size: 11px; }
+.source-results-heading label { display: flex; align-items: center; gap: 7px; }
+.source-results input[type="checkbox"] { accent-color: var(--green); }
+.source-results [hidden] { display: none; }
+
 @media (max-width: 760px) {
   main { padding: 38px 16px 28px; }
   .workflow { grid-template-columns: 1fr; }
@@ -151,4 +170,8 @@ footer { padding-top: 26px; color: #8a958d; text-align: center; font-size: 10px;
   .settings-panel { padding: 19px 16px; }
   .settings-panel .channels-heading { align-items: start; }
   .settings-groups, .settings-fields { grid-template-columns: 1fr; }
+  .sources { padding: 19px 16px; }
+  .source-search { grid-template-columns: 1fr; }
+  #sourceParams { grid-column: auto; grid-row: auto; }
+  .source-params-label { margin-top: 3px; }
 }

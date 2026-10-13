@@ -13,6 +13,8 @@
 # You should have received a copy of the GNU General Public License
 # along with this program.  If not, see <http://www.gnu.org/licenses/>.
 
+from typing import Any
+
 from chirpQt.drivers import icf
 from chirpQt import chirp_common, util, directory, bitwise
 
@@ -145,7 +147,7 @@ class IC2820Radio(icf.IcomCloneModeRadio, chirp_common.IcomDstarSupport):
     URCALL_LIMIT = (1, 61)
     RPTCALL_LIMIT = (1, 61)
 
-    _memories = {}
+    _memories: dict[Any, Any] = {}
 
     def _get_bank(self, loc):
         _bank = self._memobj.bank_info[loc]

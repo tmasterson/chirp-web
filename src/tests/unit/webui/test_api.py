@@ -10,6 +10,7 @@ from types import SimpleNamespace
 from chirpQt import chirp_common, settings
 from chirpQt.drivers.fake import FakeLiveRadio
 from chirpQt.webui import service
+from chirpQt.webui import api as web_api
 from chirpQt.webui.api import create_app
 
 from fastapi.testclient import TestClient
@@ -44,6 +45,12 @@ def test_home_and_loopback_request_guard(client):
     home = client.get('/')
     assert home.status_code == 200
     assert 'CHIRPQt Web' in home.text
+    sources = client.get('/api/sources')
+    assert sources.status_code == 200
+    assert {source['id'] for source in sources.json()} == {
+        'dmrmarc', 'przemienniki-eu', 'przemienniki-net',
+        'radioreference', 'repeaterbook',
+    }
 
     wrong_host = client.get('/', headers={'host': 'radio.example'})
     assert wrong_host.status_code == 403
@@ -84,6 +91,100 @@ def test_open_edit_and_save_csv_image(client):
     assert rows[1][1] == 'REPEATER'
     assert rows[1][2] == '145.500000'
     assert client.get('/api/session').json()['dirty'] is False
+
+
+def test_network_source_query_and_import(client, monkeypatch):
+    """Search a network source and import selected results into empty slots."""
+    class FakeSource:
+        def do_fetch(self, status, params):
+            assert params == {'city': 'Town'}
+            self.memories = [chirp_common.Memory(0)]
+            self.memories[0].name = 'Repeater'
+            self.memories[0].freq = 146520000
+            status.send_end()
+
+        def get_features(self):
+            features = chirp_common.RadioFeatures()
+            features.memory_bounds = (0, len(self.memories) - 1)
+            return features
+
+        def get_memory(self, number):
+            return self.memories[number]
+
+    monkeypatch.setitem(
+            web_api.SOURCE_CATALOG, 'test-source', {
+                'name': 'Test source',
+                'radio': FakeSource,
+                'example': {},
+                'help': '',
+            })
+    opened = client.post('/api/session/open', json={
+        'filename': 'channels.csv',
+        'data_base64': csv_image(),
+    })
+    assert opened.status_code == 200
+
+    queried = client.post('/api/sources/test-source/query', json={
+        'params': {'city': 'Town'},
+    })
+    assert queried.status_code == 200
+    assert queried.json()['memories'][0]['name'] == 'Repeater'
+
+    imported = client.post('/api/sources/import', json={
+        'query_id': queried.json()['query_id'],
+        'selected': [0],
+    })
+    assert imported.status_code == 200
+    assert imported.json()['imported'] == 1
+    assert client.get('/api/memories?start=1&limit=1').json()[
+            'memories'][0]['name'] == 'Repeater'
+    assert client.get('/api/session').json()['dirty'] is True
+
+
+def test_radioreference_query_uses_submitted_credentials(client, monkeypatch):
+    """Keep RadioReference credentials in the server-side source instance."""
+    class FakeRadioReference:
+        def __init__(self):
+            self.memories = []
+
+        def set_auth(self, username, password):
+            self.auth = (username, password)
+
+        def do_fetch(self, status, params):
+            assert self.auth == ('operator', 'secret')
+            assert params == {'country': 'US', 'zipcounty': '90210'}
+            self.memories = [chirp_common.Memory(0)]
+            self.memories[0].name = 'Private result'
+            status.send_end()
+
+        def get_features(self):
+            features = chirp_common.RadioFeatures()
+            features.memory_bounds = (0, 0)
+            return features
+
+        def get_memory(self, number):
+            return self.memories[number]
+
+    monkeypatch.setitem(
+            web_api.SOURCE_CATALOG, 'radioreference', {
+                'name': 'RadioReference',
+                'radio': FakeRadioReference,
+                'example': {},
+                'help': '',
+            })
+
+    response = client.post('/api/sources/radioreference/query', json={
+        'params': {
+            'username': 'operator',
+            'password': 'secret',
+            'country': 'US',
+            'zipcounty': '90210',
+        },
+    })
+
+    assert response.status_code == 200
+    assert response.json()['memories'][0]['name'] == 'Private result'
+    assert 'secret' not in response.text
 
 
 def test_replacing_unsaved_image_requires_confirmation(client):

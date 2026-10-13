@@ -14,15 +14,14 @@
 # along with this program.  If not, see <http://www.gnu.org/licenses/>.
 
 import logging
+from gettext import gettext as _
 
 import requests
-import wx
 
 from chirpQt.drivers import generic_csv
 from chirpQt import errors
 from chirpQt.sources import base
 
-_ = wx.GetTranslation
 LOG = logging.getLogger(__name__)
 
 

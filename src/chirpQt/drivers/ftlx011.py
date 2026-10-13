@@ -102,7 +102,7 @@ LIST_TOT = ["Off"] + ["%.1f s" % (x/10.0) for x in range(5, 80, 5)]
 # 3, 2, 1, 0 => 0 s, 6 s, 20 s, 60 s
 LIST_TOT_RESUME = ["60 s", "20 s", "6 s", "0 s"]
 LIST_A_KEY = ["Talkaround", "High/Low", "Call", "Accessory"]
-LIST_PCH = []  # dynamic, as depends on channel list.
+LIST_PCH: list[str] = []  # dynamic, as depends on channel list.
 # make a copy of the tones, is not funny to work with this directly
 TONES = list(chirp_common.TONES)
 # this old radios has not the full tone ranges in CST
@@ -276,8 +276,8 @@ class ftlx011(chirp_common.CloneModeRadio, chirp_common.ExperimentalRadio):
     VENDOR = "Vertex Standard"
     _memsize = MEM_SIZE
     _upper = 0
-    _range = []
-    finger = []  # two elements rid & IF
+    _range: list[int] = []
+    finger: list[bytes] = []  # two elements rid & IF
 
     @classmethod
     def get_prompts(cls):

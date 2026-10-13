@@ -525,7 +525,7 @@ class VX8Radio(yaesu_clone.YaesuCloneModeRadio):
                         r"(?P<m>[\d]*)[\s\']*(?P<s>[\d]*)")
 
     _RX_BAUD = ("off", "1200 baud", "9600 baud")
-    _TX_DELAY = ("100ms", "200ms", "300ms",
+    _TX_DELAY: tuple[str, ...] = ("100ms", "200ms", "300ms",
                  "400ms", "500ms", "750ms", "1000ms")
     _WIND_UNITS = ("m/s", "mph")
     _RAIN_UNITS = ("mm", "inch")
@@ -544,7 +544,7 @@ class VX8Radio(yaesu_clone.YaesuCloneModeRadio):
            "+05:00", "+05:30", "+06:00", "+06:30", "+07:00", "+07:30",
            "+08:00", "+08:30", "+09:00", "+09:30", "+10:00", "+10:30",
            "+11:00", "+11:30")
-    _BEACON_TYPE = ("Off", "Interval")
+    _BEACON_TYPE: tuple[str, ...] = ("Off", "Interval")
     _BEACON_INT = ("15s", "30s", "1m", "2m", "3m", "5m", "10m", "15m",
                    "30m")
     _DIGI_PATHS = ("OFF", "WIDE1-1", "WIDE1-1, WIDE2-1", "Digi Path 4",
@@ -553,10 +553,10 @@ class VX8Radio(yaesu_clone.YaesuCloneModeRadio):
                         "Message Group 3", "Message Group 4",
                         "Message Group 5", "Message Group 6",
                         "Message Group 7", "Message Group 8")
-    _POSITIONS = ("GPS", "Manual Latitude/Longitude",
+    _POSITIONS: tuple[str, ...] = ("GPS", "Manual Latitude/Longitude",
                   "Manual Latitude/Longitude", "P1", "P2", "P3", "P4",
                   "P5", "P6", "P7", "P8", "P9", "P10")
-    _FLASH = ("OFF", "ON")
+    _FLASH: tuple[str, ...] = ("OFF", "ON")
     _BEEP_SELECT = ("Off", "Key+Scan", "Key")
     _SQUELCH = ["%d" % x for x in range(0, 16)]
     _VOLUME = ["%d" % x for x in range(0, 33)]
@@ -1475,7 +1475,8 @@ class VX8DRadio(VX8Radio):
     _TX_DELAY = ("100ms", "150ms", "200ms", "250ms", "300ms",
                  "400ms", "500ms", "750ms", "1000ms")
     _BEACON_TYPE = ("Off", "Interval", "SmartBeaconing")
-    _SMARTBEACON_PROFILE = ("Off", "Type 1", "Type 2", "Type 3")
+    _SMARTBEACON_PROFILE: tuple[str, ...] = ("Off", "Type 1", "Type 2",
+                                             "Type 3")
     _POSITIONS = ("GPS", "Manual Latitude/Longitude",
                   "Manual Latitude/Longitude", "P1", "P2", "P3", "P4",
                   "P5", "P6", "P7", "P8", "P9")
