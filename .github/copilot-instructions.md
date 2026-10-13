@@ -1,8 +1,8 @@
-# Copilot instructions for CHIRPQt
+# Copilot instructions for CHIRP Web
 
 ## Project context
 
-This repository is a local browser-based reimplementation of CHIRP using the same underlying radio-driver abstractions as the desktop app, but exposing them through a FastAPI backend and a lightweight frontend. The source of truth is in `src/chirpQt`; the web layer is a client that manages local sessions and radio transfers rather than implementing radio logic itself.
+This repository is a local browser-based reimplementation of CHIRP using the same underlying radio-driver abstractions as the desktop app, but exposing them through a FastAPI backend and a lightweight frontend. The source of truth is in `src/chirp_web`; the web layer is a client that manages local sessions and radio transfers rather than implementing radio logic itself.
 
 ## Build, test, and lint
 
@@ -19,19 +19,19 @@ Use `.venv` when present:
 
 Start the local browser UI after editable install with:
 
-- `chirpqt-web`
+- `chirp-web`
 
 This binds to `http://127.0.0.1:8765` and is intended for local use only.
 
 ## High-level architecture
 
-- `pyproject.toml` defines the Python package and the `chirpqt-web` console script.
-- `src/chirpQt/directory.py` imports driver modules at runtime; their import-time registration populates `DRV_TO_RADIO` and `RADIO_TO_DRV`.
-- `src/chirpQt/drivers/` contains model-specific radio drivers. They follow the shared CHIRP interfaces and identify hardware via metadata such as `VENDOR`, `MODEL`, and `VARIANT`.
-- `src/chirpQt/chirp_common.py` contains the shared abstractions used across drivers: radio classes, memory layouts, feature validation, file-based image parsing, and clone-mode logic.
-- `src/chirpQt/webui/api.py` is the FastAPI layer. It enforces loopback-only host/origin checks and exposes endpoints for opening images, saving memories, and managing radio clone transfers.
-- `src/chirpQt/webui/service.py` owns the in-process radio session and transfer manager, which are the coordination points for file parsing, validation, and serial operations.
-- `src/chirpQt/webui/static/` contains the frontend assets; it is not an independent radio backend.
+- `pyproject.toml` defines the Python package and the `chirp-web` console script.
+- `src/chirp_web/directory.py` imports driver modules at runtime; their import-time registration populates `DRV_TO_RADIO` and `RADIO_TO_DRV`.
+- `src/chirp_web/drivers/` contains model-specific radio drivers. They follow the shared CHIRP interfaces and identify hardware via metadata such as `VENDOR`, `MODEL`, and `VARIANT`.
+- `src/chirp_web/chirp_common.py` contains the shared abstractions used across drivers: radio classes, memory layouts, feature validation, file-based image parsing, and clone-mode logic.
+- `src/chirp_web/webui/api.py` is the FastAPI layer. It enforces loopback-only host/origin checks and exposes endpoints for opening images, saving memories, and managing radio clone transfers.
+- `src/chirp_web/webui/service.py` owns the in-process radio session and transfer manager, which are the coordination points for file parsing, validation, and serial operations.
+- `src/chirp_web/webui/static/` contains the frontend assets; it is not an independent radio backend.
 
 ## Repository-specific conventions
 

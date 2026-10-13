@@ -1,8 +1,6 @@
 pyserial
 requests
-pywin32; platform_system=="Windows"
 suds
-yattag
-lark
 fastapi>=0.115,<1
 uvicorn>=0.34,<1
+pywin32; platform_system == "Windows"

@@ -1,8 +1,8 @@
 """Tests for the radio abstractions."""
 
-from chirpQt.errors import ImmutableValueError
-from chirpQt.utils.memory import Memory
-from chirpQt.utils.radio import Radio, RadioFeatures
+from chirp_web.errors import ImmutableValueError
+from chirp_web.utils.memory import Memory
+from chirp_web.utils.radio import Radio, RadioFeatures
 
 import pytest
 

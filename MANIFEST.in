@@ -11,4 +11,4 @@ include COPYING
 include *requirements.txt
 graft tests
 graft tools
-graft src/chirpQt/webui/static
+graft src/chirp_web/webui/static

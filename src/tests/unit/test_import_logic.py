@@ -1,6 +1,6 @@
 """Tests for copying memories between radios."""
 
-from chirpQt import chirp_common, errors, import_logic
+from chirp_web import chirp_common, errors, import_logic
 
 import pytest
 

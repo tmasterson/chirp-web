@@ -1,6 +1,6 @@
 """Tests for driver and file-format registration."""
 
-from chirpQt import directory
+from chirp_web import directory
 
 import pytest
 

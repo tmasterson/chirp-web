@@ -2,7 +2,7 @@
 
 import math
 
-from chirpQt.utils.powerlevel import (
+from chirp_web.utils.powerlevel import (
         PowerLevel,
 )
 

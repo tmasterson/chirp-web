@@ -3,8 +3,8 @@
 from io import StringIO
 from types import SimpleNamespace
 
-from chirpQt import chirp_common, errors, memmap
-from chirpQt.drivers import clone_common, generic_csv, wouxun_common
+from chirp_web import chirp_common, errors, memmap
+from chirp_web.drivers import clone_common, generic_csv, wouxun_common
 
 import pytest
 

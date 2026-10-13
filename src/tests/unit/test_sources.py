@@ -4,18 +4,18 @@ import importlib
 import json
 from types import SimpleNamespace
 
-from chirpQt import chirp_common
+from chirp_web import chirp_common
 
 import pytest
 
 import requests
 
-base = importlib.import_module('chirpQt.sources.base')
-dmrmarc = importlib.import_module('chirpQt.sources.dmrmarc')
-przemienniki_eu = importlib.import_module('chirpQt.sources.przemienniki_eu')
-przemienniki_net = importlib.import_module('chirpQt.sources.przemienniki_net')
-radioreference = importlib.import_module('chirpQt.sources.radioreference')
-repeaterbook = importlib.import_module('chirpQt.sources.repeaterbook')
+base = importlib.import_module('chirp_web.sources.base')
+dmrmarc = importlib.import_module('chirp_web.sources.dmrmarc')
+przemienniki_eu = importlib.import_module('chirp_web.sources.przemienniki_eu')
+przemienniki_net = importlib.import_module('chirp_web.sources.przemienniki_net')
+radioreference = importlib.import_module('chirp_web.sources.radioreference')
+repeaterbook = importlib.import_module('chirp_web.sources.repeaterbook')
 
 
 class FakeStatus:

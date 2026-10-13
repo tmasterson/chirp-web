@@ -33,7 +33,7 @@ def running_web_app(tmp_path):
 
     with log_path.open('w+b') as log_file:
         process = subprocess.Popen(
-            [sys.executable, '-m', 'chirpQt.webui.main',
+            [sys.executable, '-m', 'chirp_web.webui.main',
              '--no-browser', '--port', str(port)],
             cwd=ROOT,
             env=env,
@@ -70,7 +70,7 @@ def running_web_app(tmp_path):
 
 def _channel_csv():
     """Create a valid one-channel file using the public CSV serialization."""
-    from chirpQt import chirp_common
+    from chirp_web import chirp_common
 
     memory = chirp_common.Memory(0)
     memory.name = 'E2E'
@@ -93,7 +93,7 @@ def test_live_package_open_edit_save_and_local_guards(running_web_app):
 
     home = requests.get(base_url, timeout=2)
     assert home.status_code == 200
-    assert 'CHIRPQt Web' in home.text
+    assert 'CHIRP Web Web' in home.text
     assert home.headers['Content-Security-Policy'].startswith(
         "default-src 'self'")
     script = requests.get(f'{base_url}/static/app.js', timeout=2)

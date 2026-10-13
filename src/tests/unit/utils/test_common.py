@@ -1,6 +1,6 @@
 """Tests for common radio utilities."""
 
-from chirpQt.utils.common import (
+from chirp_web.utils.common import (
     ALL_DTCS_CODES,
     OLD_TONES,
     TONES,

@@ -3,7 +3,7 @@ requires = ["setuptools", "setuptools-scm"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "chirpQt"
+name = "chirp-web"
 authors = [
     {name = "Tom Masterson", email = "kd7cyu@gmail.com"}
 ]
@@ -21,24 +21,23 @@ dependencies = [
     "pyserial",
     "requests",
     "suds",
-    "yattag",
-    "lark",
     "fastapi>=0.115,<1",
     "uvicorn>=0.34,<1",
+    "pywin32; platform_system == 'Windows'",
 ]
 dynamic = ["version"]
 
 [project.scripts]
-chirpqt-web = "chirpQt.webui.main:main"
+chirp-web = "chirp_web.webui.main:main"
 
 [tool.setuptools_scm]
-version_file = "src/chirpQt/__version__.py"
+version_file = "src/chirp_web/__version__.py"
 
 [tools.setup.package-data]
-"chirpQt" = ["py.typed"]
+"chirp_web" = ["py.typed"]
 
 [tool.setuptools.package-data]
-chirpQt = ["py.typed", "webui/static/*"]
+chirp_web = ["py.typed", "webui/static/*"]
 
 [tool.pytest.ini_options]
 testpaths = ["src/tests"]

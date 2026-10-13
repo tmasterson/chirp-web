@@ -2,8 +2,8 @@
 
 # import logging
 
-from chirpQt.errors import InvalidDataError, InvalidMemoryLocation
-from chirpQt.utils.memory import Memory
+from chirp_web.errors import InvalidDataError, InvalidMemoryLocation
+from chirp_web.utils.memory import Memory
 
 import pytest
 

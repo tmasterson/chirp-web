@@ -1,6 +1,6 @@
 """Tests for the main shared radio abstractions."""
 
-from chirpQt import chirp_common, errors
+from chirp_web import chirp_common, errors
 
 import pytest
 
@@ -89,7 +89,7 @@ def test_sanitize_string_preserves_unicode_and_reuses_character_rules():
 
 def test_version_comparison_uses_candidate_and_installed_versions(monkeypatch):
     """Compare the supplied candidate against the current package version."""
-    import chirpQt.__version__ as version_module
+    import chirp_web.__version__ as version_module
 
     monkeypatch.setattr(version_module, 'version', '1.2.3')
     assert chirp_common.is_version_newer('1.2.4')

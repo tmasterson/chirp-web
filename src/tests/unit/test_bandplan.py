@@ -2,8 +2,8 @@
 
 from types import SimpleNamespace
 
-from chirpQt import bandplan
-from chirpQt.chirp_common import MODES, TUNING_STEPS
+from chirp_web import bandplan
+from chirp_web.chirp_common import MODES, TUNING_STEPS
 
 import pytest
 

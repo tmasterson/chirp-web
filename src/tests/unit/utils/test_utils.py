@@ -2,9 +2,9 @@
 
 from types import SimpleNamespace
 
-from chirpQt.errors import InvalidDataError
-from chirpQt.utils.memory import Memory
-from chirpQt.utils.utils import (
+from chirp_web.errors import InvalidDataError
+from chirp_web.utils.memory import Memory
+from chirp_web.utils.utils import (
     MemoryMapping,
     StaticBankModel,
     Status,
@@ -224,7 +224,7 @@ def test_in_range_includes_boundaries_and_empty_ranges():
 
 def test_is_version_newer_compares_candidate_to_installed(monkeypatch):
     """Compare incoming metadata against the installed package version."""
-    import chirpQt.__version__ as version_module
+    import chirp_web.__version__ as version_module
 
     monkeypatch.setattr(version_module, 'version', '1.9.0')
     assert is_version_newer('2.0.0')

@@ -8,12 +8,12 @@ for rules and guidelines.
 
 ## Local web interface
 
-CHIRPQt includes an experimental browser interface backed by the existing
+CHIRP Web includes an experimental browser interface backed by the existing
 Python radio drivers. Install the project and run:
 
 ```sh
 python -m pip install -e .
-chirpqt-web
+chirp-web
 ```
 
 The app opens at `http://127.0.0.1:8765`. It can open supported radio image

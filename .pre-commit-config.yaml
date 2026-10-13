@@ -20,7 +20,7 @@ repos:
       name: pep8
       entry: python src/tools/cpep8.py
       files: ^src/.*\.py$
-      exclude: ^src/chirpQt/drivers/
+      exclude: ^src/chirp_web/drivers/
       language: python
       additional_dependencies:
         - pep8

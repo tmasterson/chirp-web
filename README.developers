@@ -61,7 +61,7 @@ invalid in this context are caught, and the default format is used.
 
 ========
 Local web interface
-The experimental browser interface is started with the `chirpqt-web`
+The experimental browser interface is started with the `chirp-web`
 command. It serves its static assets and API from the same Python process
 bound to `127.0.0.1`; do not change this to a network-facing bind without
 adding authentication and reviewing the local-device security model.

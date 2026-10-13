@@ -2,7 +2,7 @@
 
 from types import SimpleNamespace
 
-from chirpQt.settings import (
+from chirp_web.settings import (
     InvalidNameError,
     InvalidValueError,
     MemSetting,

@@ -7,11 +7,11 @@ import time
 from pathlib import Path
 from types import SimpleNamespace
 
-from chirpQt import chirp_common, settings
-from chirpQt.drivers.fake import FakeLiveRadio
-from chirpQt.webui import service
-from chirpQt.webui import api as web_api
-from chirpQt.webui.api import create_app
+from chirp_web import chirp_common, settings
+from chirp_web.drivers.fake import FakeLiveRadio
+from chirp_web.webui import service
+from chirp_web.webui import api as web_api
+from chirp_web.webui.api import create_app
 
 from fastapi.testclient import TestClient
 
@@ -44,7 +44,7 @@ def test_home_and_loopback_request_guard(client):
     """Serve the home page but reject remote hosts and cross-origin callers."""
     home = client.get('/')
     assert home.status_code == 200
-    assert 'CHIRPQt Web' in home.text
+    assert 'CHIRP Web Web' in home.text
     sources = client.get('/api/sources')
     assert sources.status_code == 200
     assert {source['id'] for source in sources.json()} == {
