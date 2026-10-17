@@ -39,6 +39,17 @@
         <h1>Make your next channel change count.</h1>
         <p>Work with a radio image, shape your channel list, and transfer it when you're ready.</p>
       </section>
+      <section id="comparePanel" class="panel compare-panel" hidden>
+        <div class="channels-heading">
+          <div><div class="eyebrow">SOURCE IMAGE</div><h2 id="compareTitle">Compare channels</h2>
+            <p>Select channels from the other image to copy into empty slots here.</p></div>
+          <button id="copyCompared" class="button button-primary" type="button" disabled>Copy selected</button>
+        </div>
+        <div class="table-wrap"><table>
+          <thead><tr><th></th><th>CH</th><th>NAME</th><th>FREQUENCY</th><th>MODE</th><th>SHIFT</th></tr></thead>
+          <tbody id="compareRows"></tbody>
+        </table></div>
+      </section>
 
       <div id="notice" class="notice" role="status" aria-live="polite" hidden></div>
 
@@ -54,10 +65,30 @@
           </label>
           <input id="imageFile" class="visually-hidden" type="file"
                  accept=".img,.csv,.icf,.dat,.icf_ll">
+          <div class="file-actions">
+            <label class="button button-quiet" for="importFile">Merge channels from file</label>
+            <label class="button button-quiet" for="compareFile">Compare / copy from image</label>
+            <input id="importFile" class="visually-hidden" type="file"
+                   accept=".img,.csv,.icf,.dat,.icf_ll">
+            <input id="compareFile" class="visually-hidden" type="file"
+                   accept=".img,.csv,.icf,.dat,.icf_ll">
+          </div>
+          <div class="file-actions recent-actions">
+            <label class="field-label" for="recentImages">Recent images</label>
+            <select id="recentImages"><option value="">No recent images</option></select>
+            <button id="openRecent" class="button button-quiet" type="button" disabled>Reopen</button>
+          </div>
           <div id="sessionInfo" class="session-info" hidden></div>
-          <button id="saveButton" class="button button-secondary" type="button" disabled>
-            Save image to computer
-          </button>
+          <div class="file-actions">
+            <button id="saveButton" class="button button-secondary" type="button" disabled>Save image to computer</button>
+            <button id="exportCsv" class="button button-quiet" type="button" disabled>Export CSV</button>
+          </div>
+          <div class="file-actions">
+            <label class="field-label" for="configurationTemplate">New configuration</label>
+            <select id="configurationTemplate"><option value="blank">Blank CSV image</option></select>
+            <button id="newConfiguration" class="button button-quiet" type="button">Create</button>
+          </div>
+          <div id="imageTabs" class="image-tabs" aria-label="Open image tabs"></div>
         </article>
 
         <article class="panel transfer-panel">
@@ -97,8 +128,7 @@
             <select id="sourceName"><option value="">Loading sources…</option></select>
             <p id="sourceHelp" class="source-help"></p>
           </div>
-          <label class="source-params-label" for="sourceParams">Search parameters (JSON)</label>
-          <textarea id="sourceParams" rows="7" spellcheck="false">{}</textarea>
+          <div id="sourceFields" class="source-fields"></div>
           <div class="source-actions">
             <span id="sourceStatus" role="status">Choose a source and enter its search parameters.</span>
             <button id="querySource" class="button button-secondary" type="button">Search source</button>
@@ -126,13 +156,71 @@
           </div>
           <span id="channelCount" class="count-pill">Open an image to begin</span>
         </div>
+        <div class="channel-tools">
+          <label class="channel-search-label" for="channelSearch">Search channels</label>
+          <input id="channelSearch" type="search" placeholder="Name, frequency, mode, comment…" disabled>
+          <label for="channelSort">Sort by</label>
+          <select id="channelSort" disabled>
+            <option value="number">Channel number</option>
+            <option value="name">Name</option>
+            <option value="freq">Frequency</option>
+            <option value="mode">Mode</option>
+            <option value="duplex">Shift</option>
+          </select>
+          <select id="channelDirection" aria-label="Sort direction" disabled>
+            <option value="asc">Ascending</option>
+            <option value="desc">Descending</option>
+          </select>
+          <label><input id="hideEmpty" type="checkbox" disabled> Hide empty</label>
+          <label><input id="txFrequencyWorkflow" type="checkbox" disabled> TX frequency workflow</label>
+          <label><input id="showNameColumn" type="checkbox" checked disabled> Name</label>
+          <label><input id="showFrequencyColumn" type="checkbox" checked disabled> Frequency</label>
+          <label><input id="showModeColumn" type="checkbox" checked disabled> Mode</label>
+          <label><input id="showShiftColumn" type="checkbox" checked disabled> Shift</label>
+          <label><input id="showToneColumn" type="checkbox" checked disabled> Tone</label>
+          <label for="gotoChannel">Go to</label>
+          <input id="gotoChannel" type="number" min="0" aria-label="Channel number" disabled>
+          <button id="gotoButton" class="button button-quiet" type="button" disabled>Go</button>
+          <button id="moveUp" class="button button-quiet" type="button" disabled>Move up</button>
+          <button id="moveDown" class="button button-quiet" type="button" disabled>Move down</button>
+          <button id="insertChannel" class="button button-quiet" type="button" disabled>Insert row</button>
+          <button id="editSelected" class="button button-quiet" type="button" disabled>Edit selected</button>
+          <label for="arrangeField">Sort selected by</label>
+          <select id="arrangeField" disabled>
+            <option value="name">Name</option>
+            <option value="freq">Receive frequency</option>
+            <option value="mode">Mode</option>
+            <option value="duplex">Shift</option>
+            <option value="offset">Offset</option>
+            <option value="tmode">Tone mode</option>
+            <option value="comment">Comment</option>
+          </select>
+          <button id="sortSelected" class="button button-quiet" type="button" disabled>Sort selected</button>
+          <button id="clusterSelected" class="button button-quiet" type="button" disabled>Cluster selected</button>
+          <select id="deleteShift" aria-label="Delete channel shift" disabled>
+            <option value="">Delete without shifting</option>
+            <option value="block">Shift block up</option>
+            <option value="all">Shift all channels up</option>
+          </select>
+          <button id="copySelected" class="button button-quiet" type="button" disabled>Copy</button>
+          <button id="cutSelected" class="button button-quiet" type="button" disabled>Cut</button>
+          <input id="pasteChannel" type="number" min="0" placeholder="Paste at" disabled>
+          <button id="pasteSelected" class="button button-quiet" type="button" disabled>Paste</button>
+          <button id="deleteSelected" class="button button-quiet" type="button" disabled>Delete selected</button>
+          <button id="undoChange" class="button button-quiet" type="button" disabled>Undo</button>
+          <button id="redoChange" class="button button-quiet" type="button" disabled>Redo</button>
+          <button id="printChannels" class="button button-quiet" type="button" disabled>Print / preview</button>
+          <label class="field-label" for="bandplanSelect">Bandplan</label>
+          <select id="bandplanSelect" disabled></select>
+          <label><input id="autoBandplanEdits" type="checkbox" disabled> Automatic bandplan edits</label>
+        </div>
         <div class="table-wrap">
           <table>
             <thead>
-              <tr><th>CH</th><th>NAME</th><th>FREQUENCY</th><th>MODE</th><th>SHIFT</th><th>TONE</th><th></th></tr>
+              <tr><th><input id="selectChannels" type="checkbox" aria-label="Select channels on this page" disabled></th><th>CH</th><th class="channel-name-column">NAME</th><th class="frequency-column">FREQUENCY</th><th class="tx-frequency-column" hidden>TX FREQUENCY</th><th class="mode-column">MODE</th><th class="shift-column">SHIFT</th><th class="tone-column">TONE</th><th></th></tr>
             </thead>
             <tbody id="memoryRows">
-              <tr class="empty-state"><td colspan="7">Your channel list will appear here after you open an image.</td></tr>
+              <tr class="empty-state"><td colspan="8">Your channel list will appear here after you open an image.</td></tr>
             </tbody>
           </table>
         </div>
@@ -174,6 +262,7 @@
       </section>
       <footer>CHIRP Web · Your radio data stays on this computer.</footer>
     </main>
+    <section id="printContent" aria-label="Printable channel list"></section>
 
     <dialog id="editDialog" class="edit-dialog">
       <form id="editForm" method="dialog">
@@ -181,7 +270,20 @@
           <div><div class="eyebrow">CHANNEL EDITOR</div><h2 id="editTitle">Edit channel</h2></div>
           <button id="closeEditor" class="icon-button" type="button" aria-label="Close editor">×</button>
         </div>
+        <div class="bandplan-editor-tools">
+          <label class="field-label" for="editorBandplan">Bandplan defaults</label>
+          <select id="editorBandplan"></select>
+          <button id="applyBandplanDefaults" class="button button-quiet" type="button">Apply frequency defaults</button>
+        </div>
         <div id="editFields" class="edit-fields"></div>
+        <fieldset id="editExtra" class="edit-extra" hidden>
+          <legend>Driver-specific fields</legend>
+          <div id="editExtraFields" class="edit-fields"></div>
+        </fieldset>
+        <fieldset id="editBanks" class="edit-banks" hidden>
+          <legend>Channel banks</legend>
+          <div id="editBankFields"></div>
+        </fieldset>
         <div class="dialog-actions">
           <button id="cancelEdit" class="button button-quiet" type="button">Cancel</button>
           <button id="saveMemory" class="button button-primary" type="submit">Save channel</button>

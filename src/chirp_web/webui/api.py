@@ -23,18 +23,24 @@ from typing import Callable, Protocol, TypedDict, cast
 from urllib.parse import urlsplit
 
 from chirp_web import chirp_common, directory
-from chirp_web.sources import dmrmarc, przemienniki_eu, przemienniki_net
-from chirp_web.sources import radioreference, repeaterbook
+from chirp_web.sources import (
+        dmrmarc,
+        mapy73pl,
+        przemienniki_eu,
+        przemienniki_net,
+        radioreference,
+        repeaterbook,
+        satellites,
+)
 from chirp_web.webui.service import (
         DriverSession,
-        MEMORY_FIELDS,
         MAX_IMAGE_SIZE,
         TransferManager,
         WebServiceError,
 )
 
 from fastapi import FastAPI, Query
-from fastapi.responses import FileResponse, JSONResponse
+from fastapi.responses import FileResponse, JSONResponse, Response
 from fastapi.staticfiles import StaticFiles
 
 from pydantic import (
@@ -85,6 +91,7 @@ class MemoryUpdate(StrictModel):
 
     name: str | None = Field(default=None, max_length=999)
     freq: int | float | None = Field(default=None, gt=0)
+    txfreq: int | float | None = Field(default=None, gt=0)
     mode: str | None = Field(default=None, max_length=32)
     duplex: str | None = Field(default=None, max_length=16)
     offset: int | float | None = Field(default=None, ge=0)
@@ -98,6 +105,106 @@ class MemoryUpdate(StrictModel):
     tuning_step: float | None = Field(default=None, ge=0)
     skip: str | None = Field(default=None, max_length=8)
     comment: str | None = Field(default=None, max_length=4096)
+    power: float | None = None
+    extra_changes: list['ExtraChange'] | None = Field(
+            default=None, max_length=128)
+
+
+class ExtraChange(StrictModel):
+    """One driver-specific memory field change."""
+
+    path: list[StrictStr | StrictInt] = Field(min_length=2, max_length=16)
+    value: StrictBool | StrictInt | StrictFloat | StrictStr
+
+
+class MemoryDelete(StrictModel):
+    """Selected memories to erase from the open image."""
+
+    numbers: list[StrictInt | StrictStr] = Field(
+            min_length=1, max_length=200)
+    shift: str = Field(default='', pattern='^(|block|all)$')
+
+
+class MemoryMove(StrictModel):
+    """Request to move numbered channels up or down."""
+
+    numbers: list[StrictInt] = Field(min_length=1, max_length=200)
+    direction: str = Field(pattern='^(up|down)$')
+
+
+class MemoryInsert(StrictModel):
+    """Request to open an empty row at a numbered channel."""
+
+    number: StrictInt = Field(ge=0)
+
+
+class MemoryCopy(StrictModel):
+    """Request to copy or cut selected channels."""
+
+    numbers: list[StrictInt | StrictStr] = Field(
+            min_length=1, max_length=200)
+    cut: bool = False
+
+
+class MemoryPaste(StrictModel):
+    """Request to paste clipboard contents at a numbered channel."""
+
+    clipboard_id: StrictStr = Field(min_length=1, max_length=64)
+    start: StrictInt = Field(ge=0)
+    overwrite: bool = False
+
+
+class MemoryBulkUpdate(StrictModel):
+    """Apply one validated set of field changes to selected channels."""
+
+    numbers: list[StrictInt | StrictStr] = Field(
+            min_length=2, max_length=200)
+    changes: MemoryUpdate
+
+
+class MemoryArrange(StrictModel):
+    """Sort or cluster a contiguous set of numbered channels."""
+
+    numbers: list[StrictInt] = Field(min_length=2, max_length=200)
+    operation: str = Field(pattern='^(sort|cluster)$')
+    field: str = Field(default='name', max_length=32)
+    direction: str = Field(default='asc', pattern='^(asc|desc)$')
+
+
+class NewConfiguration(StrictModel):
+    """Request to create a new image from a built-in template."""
+
+    template_id: StrictStr = Field(min_length=1, max_length=64)
+    confirm_replace: bool = False
+
+
+class ImportImageRequest(StrictModel):
+    """An image whose memories should be merged into the open image."""
+
+    filename: str = Field(min_length=1, max_length=255)
+    data_base64: str = Field(max_length=(MAX_IMAGE_SIZE * 4 // 3) + 8)
+
+
+class BankUpdate(StrictModel):
+    """Rename a bank or set a channel's position within it."""
+
+    model: StrictStr = Field(min_length=1, max_length=128)
+    bank_index: StrictStr | StrictInt
+    name: StrictStr | None = Field(default=None, max_length=64)
+    memory_number: StrictInt | None = None
+    index: StrictInt | None = Field(default=None, ge=0)
+
+
+class BandplanUpdate(StrictModel):
+    """Select the bandplan used by frequency defaults."""
+
+    name: StrictStr = Field(min_length=1, max_length=32)
+
+
+class FrequencyDefaultsRequest(StrictModel):
+    """Frequency in MHz for the bandplan helper."""
+
+    frequency: StrictFloat | StrictInt = Field(gt=0)
 
 
 class BankMembershipRequest(StrictModel):
@@ -174,26 +281,74 @@ class SourceCatalogEntry(TypedDict):
     radio: Callable[[], SourceRadio]
     example: dict[str, object]
     help: str
+    fields: list[dict[str, object]]
 
 
 SOURCE_CATALOG: dict[str, SourceCatalogEntry] = {
+    'mapy73': {
+        'name': 'mapy73.pl',
+        'radio': mapy73pl.Mapy73Pl,
+        'example': {'api_option': 'pl-fmpoland'},
+        'help': 'Search a public repeater snapshot by network or country.',
+        'fields': [
+            {'name': 'api_option', 'label': 'Network / region',
+             'type': 'select', 'default': 'pl-fmpoland',
+             'options': [
+                 'pl-fmpoland', 'pl-fmlink', 'pl-dmr', 'pl-c4fm',
+                 'pl-dstar', 'pl-fm', 'cz-fm', 'sk-fm', 'fi-fm',
+                 'se-fm', 'no-fm', 'bg-fm', 'dk-fm', 'de-fm', 'si-fm',
+                 'is-fm',
+             ]},
+        ],
+    },
+    'amsat': {
+        'name': 'AMSAT active satellite frequencies',
+        'radio': satellites.AmateurSatellites,
+        'example': {},
+        'help': 'Current satellite downlink and uplink frequencies.',
+        'fields': [],
+    },
+    'satnogs': {
+        'name': 'SatNOGS',
+        'radio': satellites.SatNOGS,
+        'example': {'modes': ''},
+        'help': 'Active satellite transmitters. Optionally filter by '
+                'comma-separated modes.',
+        'fields': [
+            {'name': 'modes', 'label': 'Modes (optional)', 'type': 'list',
+             'placeholder': 'FM, USB, CW'},
+        ],
+    },
     'dmrmarc': {
         'name': 'DMR-MARC',
         'radio': dmrmarc.DMRMARCRadio,
         'example': {'city': '', 'state': '', 'country': ''},
         'help': 'Search by city, state, and country.',
+        'fields': [
+            {'name': 'city', 'label': 'City', 'type': 'text',
+             'required': True},
+            {'name': 'state', 'label': 'State / region', 'type': 'text',
+             'required': True},
+            {'name': 'country', 'label': 'Country', 'type': 'text',
+             'required': True},
+        ],
     },
     'przemienniki-eu': {
         'name': 'przemienniki.eu',
         'radio': przemienniki_eu.PrzemiennikiEu,
         'example': {},
         'help': 'Pass the search parameters accepted by przemienniki.eu.',
+        'fields': [],
     },
     'przemienniki-net': {
         'name': 'przemienniki.net',
         'radio': przemienniki_net.PrzemiennikiNet,
         'example': {'range': '0'},
         'help': 'Pass the search parameters accepted by przemienniki.net.',
+        'fields': [
+            {'name': 'range', 'label': 'Range', 'type': 'text',
+             'default': '0'},
+        ],
     },
     'radioreference': {
         'name': 'RadioReference',
@@ -206,6 +361,16 @@ SOURCE_CATALOG: dict[str, SourceCatalogEntry] = {
         },
         'help': 'Requires a RadioReference account and a US ZIP code or '
                 'Canadian county ID.',
+        'fields': [
+            {'name': 'username', 'label': 'Username', 'type': 'text',
+             'required': True},
+            {'name': 'password', 'label': 'Password', 'type': 'password',
+             'required': True},
+            {'name': 'country', 'label': 'Country', 'type': 'select',
+             'options': ['US', 'CA'], 'default': 'US'},
+            {'name': 'zipcounty', 'label': 'ZIP code / county ID',
+             'type': 'text', 'required': True},
+        ],
     },
     'repeaterbook': {
         'name': 'RepeaterBook',
@@ -227,6 +392,27 @@ SOURCE_CATALOG: dict[str, SourceCatalogEntry] = {
         },
         'help': 'Set country, state, and service; optional filters include '
                 'location, distance, bands, and modes.',
+        'fields': [
+            {'name': 'country', 'label': 'Country', 'type': 'text',
+             'required': True, 'default': 'United States'},
+            {'name': 'state', 'label': 'State / region', 'type': 'text'},
+            {'name': 'service', 'label': 'Service', 'type': 'text',
+             'required': True, 'default': 'amateur'},
+            {'name': 'filter', 'label': 'Keyword filter', 'type': 'text'},
+            {'name': 'lat', 'label': 'Latitude', 'type': 'number'},
+            {'name': 'lon', 'label': 'Longitude', 'type': 'number'},
+            {'name': 'dist', 'label': 'Distance (km)', 'type': 'number'},
+            {'name': 'bands', 'label': 'Bands (MHz ranges, comma-separated)',
+             'type': 'bands'},
+            {'name': 'modes', 'label': 'Modes (comma-separated)',
+             'type': 'list'},
+            {'name': 'fmconv', 'label': 'Convert compatible entries to FM',
+             'type': 'boolean'},
+            {'name': 'openonly', 'label': 'Open repeaters only',
+             'type': 'boolean'},
+            {'name': 'cached', 'label': 'Include cached nearby results',
+             'type': 'boolean'},
+        ],
     },
 }
 
@@ -335,6 +521,44 @@ def create_app() -> FastAPI:
     def get_session():
         return session.describe()
 
+    @app.post('/api/session/close')
+    def close_session():
+        session.close()
+        return {'closed': True}
+
+    @app.get('/api/configurations')
+    def list_configurations():
+        return session.configurations()
+
+    @app.post('/api/session/new')
+    def new_configuration(payload: NewConfiguration):
+        return session.new_configuration(
+                payload.template_id, payload.confirm_replace)
+
+    @app.get('/api/session/history')
+    def get_history():
+        return session.history()
+
+    @app.post('/api/session/undo')
+    def undo():
+        return session.undo()
+
+    @app.post('/api/session/redo')
+    def redo():
+        return session.redo()
+
+    @app.get('/api/bandplans')
+    def get_bandplans():
+        return session.bandplans()
+
+    @app.patch('/api/bandplans')
+    def set_bandplan(payload: BandplanUpdate):
+        return session.set_bandplan(payload.name)
+
+    @app.post('/api/bandplans/defaults')
+    def get_frequency_defaults(payload: FrequencyDefaultsRequest):
+        return session.frequency_defaults(payload.frequency)
+
     @app.get('/api/sources')
     def list_sources():
         return [
@@ -343,6 +567,7 @@ def create_app() -> FastAPI:
                 'name': source['name'],
                 'example': source['example'],
                 'help': source['help'],
+                'fields': source.get('fields', []),
             }
             for source_id, source in SOURCE_CATALOG.items()
         ]
@@ -405,11 +630,7 @@ def create_app() -> FastAPI:
             'source': source['name'],
             'count': len(memories),
             'memories': [
-                {
-                    **{field: getattr(memory, field, None)
-                       for field in MEMORY_FIELDS},
-                    'number': index,
-                }
+                {**session._memory_dict(memory), 'number': index}
                 for index, memory in enumerate(memories)
             ],
             'status': status.updates[-1] if status.updates else None,
@@ -419,6 +640,19 @@ def create_app() -> FastAPI:
     def import_source_results(payload: SourceImport):
         return session.import_source_results(
                 payload.query_id, payload.selected)
+
+    @app.post('/api/session/compare')
+    def compare_image(payload: ImportImageRequest):
+        try:
+            return session.preview_image_memories(
+                    payload.filename, payload.data_base64)
+        except WebServiceError:
+            raise
+        except Exception as exc:
+            LOG.exception('Unable to read source image for comparison')
+            raise WebServiceError(
+                    'The selected file could not be read as a radio image.',
+                    422) from exc
 
     @app.post('/api/session/open')
     def open_image(payload: OpenImageRequest):
@@ -436,32 +670,106 @@ def create_app() -> FastAPI:
                     'radio driver.', 422) from exc
 
     @app.get('/api/memories')
-    def list_memories(start: int | None = Query(default=None),
-                      limit: int = Query(default=50, ge=1, le=200)):
+    def list_memories(start: int | None = Query(default=None, ge=0),
+                      limit: int = Query(default=50, ge=1, le=200),
+                      search: str = Query(default='', max_length=200),
+                      sort: str = Query(
+                          default='number',
+                          pattern='^(number|name|freq|mode|duplex)$'),
+                      direction: str = Query(
+                          default='asc', pattern='^(asc|desc)$'),
+                      hide_empty: bool = False):
         details = session.describe()
         low, high = details['memory_bounds']
-        return session.memories(low if start is None else start, limit)
+        filtered = bool(search or sort != 'number' or direction != 'asc' or
+                        hide_empty)
+        return session.memories(
+                (0 if filtered else low) if start is None else start,
+                limit, search, sort, direction, hide_empty)
+
+    @app.post('/api/memories/delete')
+    def delete_memories(payload: MemoryDelete):
+        numbers = [
+            int(number) if isinstance(number, str) and number.isdecimal()
+            else number for number in payload.numbers
+        ]
+        return session.delete_memories(numbers, payload.shift)
+
+    @app.post('/api/memories/move')
+    def move_memories(payload: MemoryMove):
+        return session.move_memories(payload.numbers, payload.direction)
+
+    @app.post('/api/memories/insert')
+    def insert_memory(payload: MemoryInsert):
+        return session.insert_memory_row(payload.number)
+
+    @app.post('/api/memories/copy')
+    def copy_memories(payload: MemoryCopy):
+        numbers = [
+            int(number) if isinstance(number, str) and number.isdecimal()
+            else number for number in payload.numbers
+        ]
+        return session.copy_memories(numbers, cut=payload.cut)
+
+    @app.post('/api/memories/paste')
+    def paste_memories(payload: MemoryPaste):
+        return session.paste_memories(
+                payload.clipboard_id, payload.start, payload.overwrite)
+
+    @app.patch('/api/memories/bulk')
+    def bulk_update_memories(payload: MemoryBulkUpdate):
+        numbers = [
+            int(number) if isinstance(number, str) and number.isdecimal()
+            else number for number in payload.numbers
+        ]
+        changes = payload.changes.model_dump(exclude_unset=True)
+        extra_changes = changes.pop('extra_changes', None)
+        if any(value is None for value in changes.values()):
+            raise WebServiceError(
+                    'Memory field values cannot be null.', 422)
+        if extra_changes is None and not changes:
+            raise WebServiceError('Provide at least one memory field.', 422)
+        return session.bulk_update_memories(
+                numbers, changes, extra_changes)
+
+    @app.post('/api/memories/arrange')
+    def arrange_memories(payload: MemoryArrange):
+        return session.arrange_memories(
+                payload.numbers, payload.operation,
+                payload.field, payload.direction)
 
     @app.patch('/api/memories/{number}')
-    def update_memory(number: int, payload: MemoryUpdate):
+    def update_memory(number: str, payload: MemoryUpdate):
+        number = int(number) if number.isdecimal() else number
         values = payload.model_dump(exclude_unset=True)
+        extra_changes = values.pop('extra_changes', None)
         if any(value is None for value in values.values()):
             raise WebServiceError(
                     'Memory field values cannot be null.', 422)
-        return session.update_memory(number, values)
+        if extra_changes is None and not values:
+            raise WebServiceError('Provide at least one memory field.', 422)
+        return session.update_memory(number, values, extra_changes)
 
     @app.get('/api/banks')
     def list_banks():
         return session.bank_models()
 
     @app.patch('/api/memories/{number}/banks')
-    def update_memory_bank_membership(number: int, payload: BankMembershipRequest):
+    def update_memory_bank_membership(
+            number: str, payload: BankMembershipRequest):
+        number = int(number) if number.isdecimal() else number
         return session.update_memory_bank_membership(
                 number,
                 payload.model,
                 payload.bank_index,
                 payload.enabled,
         )
+
+    @app.patch('/api/banks')
+    def update_bank(payload: BankUpdate):
+        return session.update_bank(
+                payload.model, payload.bank_index, payload.name,
+                payload.memory_number, payload.index)
 
     @app.get('/api/settings')
     def get_settings():
@@ -474,9 +782,9 @@ def create_app() -> FastAPI:
                 confirm_warnings=payload.confirm_warnings)
 
     @app.post('/api/session/save')
-    def save_image():
+    def save_image(preserve_dirty: bool = False):
         try:
-            return session.save_image()
+            return session.save_image(mark_clean=not preserve_dirty)
         except WebServiceError:
             raise
         except Exception as exc:
@@ -484,6 +792,27 @@ def create_app() -> FastAPI:
             raise WebServiceError(
                     'The radio driver could not save this image.',
                     500) from exc
+
+    @app.get('/api/session/export.csv')
+    def export_csv():
+        return Response(
+                session.export_csv(),
+                media_type='text/csv',
+                headers={'Content-Disposition':
+                         'attachment; filename="channels.csv"'})
+
+    @app.post('/api/session/import')
+    def import_image(payload: ImportImageRequest):
+        try:
+            return session.import_image_memories(
+                    payload.filename, payload.data_base64)
+        except WebServiceError:
+            raise
+        except Exception as exc:
+            LOG.exception('Unable to merge memories from uploaded image')
+            raise WebServiceError(
+                    'The selected file could not be read as a radio image.',
+                    422) from exc
 
     @app.post('/api/transfers/download')
     def download_radio(payload: DownloadRequest):

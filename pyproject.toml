@@ -44,7 +44,7 @@ version_file = "src/chirp_web/__version__.py"
 "chirp_web" = ["py.typed"]
 
 [tool.setuptools.package-data]
-chirp_web = ["py.typed", "webui/static/*"]
+chirp_web = ["py.typed", "webui/static/*", "stock_configs/*.csv"]
 
 [tool.pytest.ini_options]
 testpaths = ["src/tests"]
