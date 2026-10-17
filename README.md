@@ -24,3 +24,6 @@ it replaces the radio's current programming.
 
 The web server binds to loopback and is not intended for LAN or hosted use.
 Radio images are processed locally and are not uploaded to a remote service.
+
+For platform-specific installation instructions, see
+[Installing CHIRP Web](INSTALL.md).

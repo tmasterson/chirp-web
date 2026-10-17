@@ -9,12 +9,19 @@ authors = [
 ]
 description = "Rewrite of the chirp program using a web ui"
 readme = "README.md"
+license = "GPL-3.0-or-later"
 classifiers = [
     "Private :: Do Not Upload",
-    "Development Status :: 2 - Pre-Alpha",
-    "Environment :: X11 Applications :: Qt",
-    "Environment :: Win32",
-    "License :: OSI Approved :: GnU General Public License v3 (GPLv3)"
+    "Development Status :: 3 - Alpha",
+    "Environment :: Web Environment",
+    "Framework :: FastAPI",
+    "Intended Audience :: End Users/Desktop",
+    "License :: OSI Approved :: GNU General Public License v3 or later (GPLv3+)",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.12",
+    "Topic :: Communications :: Ham Radio",
+    "Topic :: Internet :: WWW/HTTP :: HTTP Servers",
+    "Typing :: Typed",
 ]
 requires-python = ">=3.12"
 dependencies = [
