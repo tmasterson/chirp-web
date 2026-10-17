@@ -100,6 +100,14 @@ class MemoryUpdate(StrictModel):
     comment: str | None = Field(default=None, max_length=4096)
 
 
+class BankMembershipRequest(StrictModel):
+    """Toggle one memory's membership in a bank model."""
+
+    model: str | None = Field(default=None, max_length=128)
+    bank_index: StrictStr | StrictInt = Field(default=0)
+    enabled: bool = True
+
+
 class SettingChange(StrictModel):
     """One setting path and its new typed value."""
 
@@ -441,6 +449,19 @@ def create_app() -> FastAPI:
             raise WebServiceError(
                     'Memory field values cannot be null.', 422)
         return session.update_memory(number, values)
+
+    @app.get('/api/banks')
+    def list_banks():
+        return session.bank_models()
+
+    @app.patch('/api/memories/{number}/banks')
+    def update_memory_bank_membership(number: int, payload: BankMembershipRequest):
+        return session.update_memory_bank_membership(
+                number,
+                payload.model,
+                payload.bank_index,
+                payload.enabled,
+        )
 
     @app.get('/api/settings')
     def get_settings():

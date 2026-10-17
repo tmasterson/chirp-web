@@ -40,6 +40,60 @@ def csv_image():
     return base64.b64encode(content.encode('utf-8')).decode('ascii')
 
 
+class SimpleBankModel(chirp_common.BankModel):
+    """A simple editable bank model for testing web bank support."""
+
+    def __init__(self, radio):
+        super().__init__(radio, name='Test banks')
+        self._banks = [
+            chirp_common.MemoryMapping(self, 0, 'Bank 1'),
+            chirp_common.MemoryMapping(self, 1, 'Bank 2'),
+        ]
+        self._members = {bank.get_index(): [] for bank in self._banks}
+
+    def get_num_mappings(self):
+        return len(self._banks)
+
+    def get_mappings(self):
+        return list(self._banks)
+
+    def add_memory_to_mapping(self, memory, mapping):
+        members = self._members.setdefault(mapping.get_index(), [])
+        if memory.number not in members:
+            members.append(memory.number)
+
+    def remove_memory_from_mapping(self, memory, mapping):
+        self._members.setdefault(mapping.get_index(), [])
+        self._members[mapping.get_index()] = [
+            number for number in self._members[mapping.get_index()]
+            if number != memory.number
+        ]
+
+    def get_mapping_memories(self, mapping):
+        return [self._radio.get_memory(number)
+                for number in self._members.get(mapping.get_index(), [])]
+
+    def get_memory_mappings(self, memory):
+        return [
+            self._banks[index] for index, members in self._members.items()
+            if memory.number in members
+        ]
+
+
+class BankedRadio(FakeLiveRadio):
+    """Fake radio with an editable two-bank model."""
+
+    def __init__(self, *a, **k):
+        super().__init__(*a, **k)
+        self._bank_model = SimpleBankModel(self)
+        for number in (1, 3, 5):
+            self._bank_model.add_memory_to_mapping(self.get_memory(number),
+                                                  self._bank_model.get_mappings()[0])
+
+    def get_mapping_models(self):
+        return [self._bank_model]
+
+
 def test_home_and_loopback_request_guard(client):
     """Serve the home page but reject remote hosts and cross-origin callers."""
     home = client.get('/')
@@ -231,6 +285,36 @@ def test_memory_updates_reject_invalid_fields(client, payload):
     changed = client.patch('/api/memories/0', json=payload)
     assert changed.status_code == 422
     assert client.get('/api/session').json()['dirty'] is False
+
+
+def test_bank_models_are_exposed_and_toggled(client):
+    """Expose bank layouts from the radio model and allow membership edits."""
+    radio = BankedRadio(None)
+    client.app.state.session._replace_radio(radio, 'banks.img', None)
+
+    listing = client.get('/api/banks')
+    assert listing.status_code == 200
+    payload = listing.json()
+    assert payload['supported'] is True
+    assert payload['models'][0]['name'] == 'Test banks'
+    assert payload['models'][0]['mappings'][0]['members'] == [1, 3, 5]
+
+    toggled = client.patch('/api/memories/2/banks', json={
+        'model': 'Test banks',
+        'bank_index': 0,
+        'enabled': True,
+    })
+    assert toggled.status_code == 200
+    assert toggled.json()['enabled'] is True
+    assert client.get('/api/banks').json()['models'][0]['mappings'][0]['members'] == [1, 2, 3, 5]
+
+    removed = client.patch('/api/memories/3/banks', json={
+        'model': 'Test banks',
+        'bank_index': 0,
+        'enabled': False,
+    })
+    assert removed.status_code == 200
+    assert client.get('/api/banks').json()['models'][0]['mappings'][0]['members'] == [1, 2, 5]
 
 
 def test_radio_settings_can_be_loaded_and_updated(client):

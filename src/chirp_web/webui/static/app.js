@@ -187,6 +187,41 @@ function renderSourceResults(result) {
   updateImportButton();
 }
 
+function renderBanks() {
+  const container = $('#bankModels');
+  const models = state.session?.bank_models || [];
+  if (!models.length) {
+    container.innerHTML = '<p class="settings-status">This radio does not expose bank assignments.</p>';
+    return;
+  }
+
+  container.replaceChildren();
+  models.forEach((model) => {
+    const card = document.createElement('div');
+    card.className = 'bank-model';
+    const title = document.createElement('h3');
+    title.textContent = model.name;
+    card.append(title);
+    const list = document.createElement('div');
+    list.className = 'bank-mappings';
+    model.mappings.forEach((mapping) => {
+      const item = document.createElement('div');
+      item.className = 'bank-mapping';
+      const label = document.createElement('strong');
+      label.textContent = `${mapping.name ?? String(mapping.index)}`;
+      const channels = document.createElement('span');
+      const memberText = mapping.members.length
+        ? mapping.members.map((value) => `#${value}`).join(', ')
+        : 'No channels in this bank';
+      channels.textContent = memberText;
+      item.append(label, channels);
+      list.append(item);
+    });
+    card.append(list);
+    container.append(card);
+  });
+}
+
 function renderSession() {
   const details = $('#sessionInfo');
   const saveButton = $('#saveButton');
@@ -200,6 +235,7 @@ function renderSession() {
     $('#pageLabel').textContent = '—';
     $('#loadSettings').disabled = true;
     $('#applySettings').disabled = true;
+    renderBanks();
     updateImportButton();
     setBusy(false);
     return;
@@ -212,6 +248,7 @@ function renderSession() {
   $('#channelCount').textContent = `${state.total.toLocaleString()} channels`;
   $('#loadSettings').disabled = state.busy || !state.session.has_settings;
   $('#applySettings').disabled = state.busy || !hasChangedSettings();
+  renderBanks();
   updateImportButton();
 }
 
@@ -280,6 +317,7 @@ async function refreshSession() {
     ? 'Load this radio’s settings to view and edit them.'
     : 'This radio driver does not expose general settings.';
   renderSession();
+  renderBanks();
   await loadMemories();
 }
 

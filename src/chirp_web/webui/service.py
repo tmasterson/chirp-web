@@ -132,6 +132,28 @@ class DriverSession:
             raise WebServiceError(
                     'Wait for the active radio transfer to finish.', 409)
 
+    @staticmethod
+    def _bank_model_summary(model):
+        """Serialize a radio mapping model for the browser."""
+        try:
+            mappings = list(model.get_mappings())
+        except NotImplementedError:
+            mappings = []
+        return {
+            'name': model.get_name(),
+            'count': model.get_num_mappings(),
+            'mappings': [
+                {
+                    'index': mapping.get_index(),
+                    'name': mapping.get_name(),
+                    'members': sorted(
+                        memory.number for memory in model.get_mapping_memories(mapping)
+                    ),
+                }
+                for mapping in mappings
+            ],
+        }
+
     def describe(self):
         """Return the open radio's identity and supported memory features."""
         with self.lock:
@@ -146,6 +168,10 @@ class DriverSession:
                 'has_settings': rf.has_settings,
                 'memory_bounds': list(rf.memory_bounds),
                 'valid_special_chans': list(rf.valid_special_chans),
+                'bank_models': [
+                    self._bank_model_summary(model)
+                    for model in radio.get_mapping_models()
+                ],
                 'features': {
                     'has_name': rf.has_name,
                     'valid_name_length': rf.valid_name_length,
@@ -486,6 +512,69 @@ class DriverSession:
             self.dirty = True
             return {'memory': self._memory_dict(radio.get_memory(number)),
                     'warnings': [str(warning) for warning in warnings]}
+
+    def bank_models(self):
+        """Return all active mapping models (such as bank models)."""
+        with self.lock:
+            self._ensure_idle()
+            radio = self._require_radio()
+            models = radio.get_mapping_models()
+            return {
+                'supported': bool(models),
+                'models': [
+                    self._bank_model_summary(model)
+                    for model in models
+                ],
+            }
+
+    def update_memory_bank_membership(self, number, model_name, bank_index,
+                                     enabled):
+        """Toggle a memory's membership in one bank mapping."""
+        with self.lock:
+            self._ensure_idle()
+            radio = self._require_radio()
+            models = radio.get_mapping_models()
+            if not models:
+                raise WebServiceError(
+                        'This radio does not expose any bank models.', 422)
+            if not model_name:
+                if len(models) != 1:
+                    raise WebServiceError(
+                            'Choose a bank model before updating membership.',
+                            422)
+                model = models[0]
+            else:
+                model = next((item for item in models
+                              if item.get_name() == model_name), None)
+                if model is None:
+                    raise WebServiceError(
+                            'The selected bank model was not found.', 422)
+
+            mappings = list(model.get_mappings())
+            if not mappings:
+                raise WebServiceError(
+                        'The selected bank model has no mappings.', 422)
+            selected = next((mapping for mapping in mappings
+                             if str(mapping.get_index()) == str(bank_index)),
+                            None)
+            if selected is None:
+                try:
+                    selected = mappings[int(bank_index)]
+                except (TypeError, ValueError, IndexError) as exc:
+                    raise WebServiceError(
+                            'The selected bank was not found.', 422) from exc
+
+            memory = radio.get_memory(number)
+            if enabled:
+                model.add_memory_to_mapping(memory, selected)
+            else:
+                model.remove_memory_from_mapping(memory, selected)
+            self.dirty = True
+            return {'memory': self._memory_dict(radio.get_memory(number)),
+                    'model': model.get_name(),
+                    'bank': {'index': selected.get_index(),
+                            'name': selected.get_name()},
+                    'enabled': enabled}
 
     def remember_source_results(self, memories):
         """Keep query results server-side for selected imports."""

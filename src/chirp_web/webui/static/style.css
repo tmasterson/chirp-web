@@ -155,6 +155,15 @@ footer { padding-top: 26px; color: #8a958d; text-align: center; font-size: 10px;
 .settings-actions { display: flex; justify-content: space-between; align-items: center; gap: 12px; margin-top: 16px; }
 .settings-changed { color: #8a5c14; font-size: 11px; }
 
+.banks-panel { margin-top: 16px; padding: 22px 24px; }
+.bank-models { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 12px; }
+.bank-model { border: 1px solid var(--line); border-radius: 8px; padding: 12px; background: #fbfdfb; }
+.bank-model h3 { margin: 0 0 10px; font: 600 14px "Space Grotesk", sans-serif; letter-spacing: -.2px; }
+.bank-mappings { display: grid; gap: 8px; }
+.bank-mapping { display: grid; gap: 3px; border-top: 1px solid var(--line); padding-top: 8px; }
+.bank-mapping strong { font-size: 12px; }
+.bank-mapping span { color: var(--muted); font-size: 10px; line-height: 1.5; word-break: break-word; }
+
 .sources { margin-bottom: 16px; padding: 22px 24px; }
 .sources .channels-heading { margin-bottom: 10px; }
 .sources .channels-heading p { max-width: 680px; margin: 8px 0 0; color: var(--muted); font-size: 12px; line-height: 1.5; }
