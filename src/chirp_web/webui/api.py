@@ -16,8 +16,15 @@
 # along with this program.  If not, see <http://www.gnu.org/licenses/>.
 
 import logging
+import json
 import math
+import platform
+import threading
+import time
+import uuid
+from concurrent.futures import ThreadPoolExecutor
 from contextlib import asynccontextmanager
+from importlib import metadata
 from pathlib import Path
 from typing import Callable, Protocol, TypedDict, cast
 from urllib.parse import urlsplit
@@ -77,6 +84,7 @@ class DownloadRequest(StrictModel):
     radio_id: str = Field(min_length=1, max_length=200)
     port: str = Field(min_length=1, max_length=512)
     confirm_replace: bool = False
+    confirm_prompts: bool = False
 
 
 class UploadRequest(StrictModel):
@@ -84,6 +92,7 @@ class UploadRequest(StrictModel):
 
     port: str = Field(min_length=1, max_length=512)
     confirm: bool
+    confirm_prompts: bool = False
 
 
 class MemoryUpdate(StrictModel):
@@ -183,6 +192,22 @@ class ImportImageRequest(StrictModel):
 
     filename: str = Field(min_length=1, max_length=255)
     data_base64: str = Field(max_length=(MAX_IMAGE_SIZE * 4 // 3) + 8)
+    placement: str = Field(default='empty',
+                           pattern='^(empty|matching|append|range)$')
+    destination_start: StrictInt | None = Field(default=None, ge=0)
+
+
+class BackupStorageSettings(StrictModel):
+    """Opt-in local directory and retention policy for clone backups."""
+
+    directory: StrictStr | None = Field(default=None, max_length=4096)
+    retention: StrictInt = Field(default=10, ge=1, le=100)
+
+
+class TabOrder(StrictModel):
+    """Ordered identifiers for every open image tab."""
+
+    tab_ids: list[StrictStr] = Field(min_length=1, max_length=64)
 
 
 class BankUpdate(StrictModel):
@@ -229,6 +254,64 @@ class SettingsUpdate(StrictModel):
     confirm_warnings: bool = False
 
 
+class MemoryFilter(StrictModel):
+    """One structured channel filter."""
+
+    field: str = Field(
+            pattern='^(name|freq|mode|duplex|tmode|comment|skip)$')
+    operator: str = Field(pattern='^(equals|contains|matches|range|in)$')
+    value: StrictStr | StrictInt | StrictFloat | list[
+            StrictStr | StrictInt | StrictFloat]
+
+
+class MemoryQuery(StrictModel):
+    """Structured channel list query."""
+
+    filters: list[MemoryFilter] = Field(default_factory=list, max_length=12)
+    match: str = Field(default='all', pattern='^(all|any)$')
+    start: StrictInt = Field(default=0, ge=0)
+    limit: StrictInt = Field(default=50, ge=1, le=200)
+    sort: str = Field(default='number',
+                      pattern='^(number|name|freq|mode|duplex)$')
+    direction: str = Field(default='asc', pattern='^(asc|desc)$')
+    hide_empty: StrictBool = False
+
+
+class MemoryScope(StrictModel):
+    """An explicit print or CSV-export selection."""
+
+    scope: str = Field(pattern='^(all|selected|filtered)$')
+    numbers: list[StrictInt | StrictStr] = Field(default_factory=list,
+                                                   max_length=1000)
+    filters: list[MemoryFilter] = Field(default_factory=list, max_length=12)
+    match: str = Field(default='all', pattern='^(all|any)$')
+    search: str = Field(default='', max_length=200)
+    sort: str = Field(default='number',
+                      pattern='^(number|name|freq|mode|duplex)$')
+    direction: str = Field(default='asc', pattern='^(asc|desc)$')
+    hide_empty: StrictBool = False
+
+
+class TabMemoryCompare(StrictModel):
+    """Selected memories compared with another open image tab."""
+
+    tab_id: StrictStr = Field(min_length=1, max_length=64)
+    numbers: list[StrictInt | StrictStr] = Field(min_length=1, max_length=200)
+
+
+class SupportReportRequest(StrictModel):
+    """User-selected safe attachments for a support report."""
+
+    include: list[StrictStr] = Field(min_length=1, max_length=8)
+
+
+class RecoveryImport(StrictModel):
+    """Explicit browser-provided image snapshots for recovery."""
+
+    tabs: list[dict[StrictStr, StrictStr]] = Field(min_length=1,
+                                                     max_length=16)
+
+
 class SourceQuery(StrictModel):
     """Source-specific search parameters submitted by the browser."""
 
@@ -245,22 +328,192 @@ class SourceImport(StrictModel):
 class SourceQueryStatus:
     """Capture progress and failure state from a network source."""
 
-    def __init__(self):
+    def __init__(self, cancelled=None, update=None):
         self.updates = []
         self.failures = []
         self.ended = False
+        self.cancelled = cancelled or threading.Event()
+        self.update = update
 
     def send_status(self, message, percent):
-        self.updates.append({
+        if self.cancelled.is_set():
+            raise WebServiceError('Source query was cancelled.', 409)
+        status = {
             'message': str(message),
             'percent': max(0, min(100, int(percent))),
-        })
+        }
+        self.updates.append(status)
+        if self.update:
+            self.update(status)
 
     def send_end(self):
         self.ended = True
 
     def send_fail(self, reason):
         self.failures.append(str(reason))
+
+
+class SourceQueryManager:
+    """Run network source queries without blocking HTTP request workers."""
+
+    def __init__(self, session):
+        self.session = session
+        self.executor = ThreadPoolExecutor(
+                max_workers=2, thread_name_prefix='chirp-web-source')
+        self.lock = threading.Lock()
+        self.jobs = {}
+        self.results = {}
+        self.history = []
+
+    @staticmethod
+    def _safe_params(params):
+        return {
+            key: value for key, value in params.items()
+            if key.casefold() not in {'password', 'username', 'token',
+                                      'api_key', 'apikey'}
+        }
+
+    def start(self, source_id, source, params, tab_id):
+        job_id = str(uuid.uuid4())
+        job = {
+            'id': job_id, 'state': 'running', 'progress': 0,
+            'message': 'Starting source query', 'result': None,
+            'error': None, 'cancelled': threading.Event(),
+            'source_id': source_id, 'source': source['name'],
+            'params': self._safe_params(params),
+            'started_at': time.monotonic(),
+        }
+        with self.lock:
+            self.jobs[job_id] = job
+        self.executor.submit(
+                self._run, job_id, source_id, source, params, tab_id)
+        return self._public(job)
+
+    @staticmethod
+    def _public(job):
+        return {key: value for key, value in job.items()
+                if key != 'cancelled'}
+
+    def _update(self, job_id, status):
+        with self.lock:
+            job = self.jobs[job_id]
+            job['message'] = status['message']
+            job['progress'] = status['percent']
+
+    def _run(self, job_id, source_id, source, params, tab_id):
+        with self.lock:
+            job = self.jobs[job_id]
+        status = SourceQueryStatus(
+                job['cancelled'],
+                lambda update: self._update(job_id, update))
+        try:
+            radio = source['radio']()
+            if source_id == 'radioreference':
+                username = params.pop('username')
+                password = params.pop('password')
+                cast(RadioReferenceSourceRadio, radio).set_auth(
+                        username, password)
+            radio.do_fetch(status, params)
+            if job['cancelled'].is_set():
+                raise WebServiceError('Source query was cancelled.', 409)
+            if status.failures:
+                raise WebServiceError(status.failures[-1], 502)
+            if not status.ended:
+                raise WebServiceError(
+                        'The selected source did not complete its query.',
+                        502)
+            low, high = radio.get_features().memory_bounds
+            memories = []
+            for number in range(low, high + 1):
+                memory = radio.get_memory(number)
+                if not memory.empty:
+                    memories.append(memory)
+            query_id = str(uuid.uuid4())
+            with self.lock:
+                self.results[query_id] = memories
+            result = {
+                'query_id': query_id, 'source': source['name'],
+                'count': len(memories),
+                'memories': [
+                    {**self.session._memory_dict(memory), 'number': index}
+                    for index, memory in enumerate(memories)
+                ],
+            }
+            with self.lock:
+                job.update(
+                        state='complete', progress=100,
+                        message='Source query complete', result=result)
+        except Exception as exc:
+            if isinstance(exc, WebServiceError) and exc.status_code == 409:
+                state, message = 'cancelled', str(exc)
+            else:
+                LOG.exception('Network source %s query failed', source_id)
+                state, message = 'failed', 'The selected source query failed.'
+            with self.lock:
+                job.update(state=state, error=message, message=message)
+        finally:
+            with self.lock:
+                job = self.jobs[job_id]
+                record = {
+                    key: job[key] for key in (
+                        'id', 'source_id', 'source', 'params', 'state',
+                        'error')
+                }
+                record['count'] = (job['result'] or {}).get('count', 0)
+                record['duration_ms'] = int(
+                        (time.monotonic() - job['started_at']) * 1000)
+                self.history.insert(0, record)
+                del self.history[20:]
+
+    def get(self, job_id):
+        with self.lock:
+            job = self.jobs.get(job_id)
+            if job is None:
+                raise WebServiceError('Source query job was not found.', 404)
+            return self._public(job)
+
+    def cancel(self, job_id):
+        with self.lock:
+            job = self.jobs.get(job_id)
+            if job is None:
+                raise WebServiceError('Source query job was not found.', 404)
+            if job['state'] == 'running':
+                job['cancelled'].set()
+                job.update(message='Cancelling source query')
+            return self._public(job)
+
+    def import_results(self, query_id, selected):
+        with self.lock:
+            memories = self.results.pop(query_id, None)
+        if memories is None:
+            raise WebServiceError('Source results have expired.', 404)
+        token = self.session.remember_source_results(memories)
+        return self.session.import_source_results(token, selected)
+
+    def history_summary(self):
+        with self.lock:
+            return {'jobs': [dict(item) for item in self.history]}
+
+    def retry(self, history_id, catalog, tab_id):
+        with self.lock:
+            record = next(
+                    (item for item in self.history
+                     if item['id'] == history_id), None)
+        if record is None:
+            raise WebServiceError('Source query history was not found.', 404)
+        source = catalog.get(record['source_id'])
+        if source is None:
+            raise WebServiceError('The saved source is no longer available.',
+                                  404)
+        if record['source_id'] == 'radioreference':
+            raise WebServiceError(
+                    'Re-enter RadioReference credentials before retrying.',
+                    409)
+        return self.start(record['source_id'], source,
+                          dict(record['params']), tab_id)
+
+    def close(self):
+        self.executor.shutdown(wait=False, cancel_futures=True)
 
 
 class SourceRadio(Protocol):
@@ -450,12 +703,14 @@ def create_app() -> FastAPI:
     directory.import_drivers()
     session = DriverSession()
     transfers = TransferManager(session)
+    source_queries = SourceQueryManager(session)
 
     @asynccontextmanager
     async def lifespan(app):
         try:
             yield
         finally:
+            source_queries.close()
             transfers.close()
 
     app = FastAPI(
@@ -467,6 +722,7 @@ def create_app() -> FastAPI:
     )
     app.state.session = session
     app.state.transfers = transfers
+    app.state.source_queries = source_queries
 
     @app.middleware('http')
     async def restrict_to_local_origin(request, call_next):
@@ -488,7 +744,31 @@ def create_app() -> FastAPI:
             return JSONResponse(
                     {'detail': 'Cross-site requests are not allowed.'},
                     status_code=403)
-        response = await call_next(request)
+        tab_id = request.headers.get('x-chirp-tab')
+        tab_token = None
+        if (tab_id and request.url.path.startswith('/api/') and
+                not request.url.path.startswith('/api/transfers/')):
+            tab_token = session.use_tab(tab_id)
+        live_mutations = (
+            (request.url.path != '/api/memories/query' and
+             request.url.path.startswith('/api/memories/')) or
+            request.url.path in {
+                '/api/settings', '/api/banks', '/api/sources/import',
+                '/api/session/import',
+            }
+        )
+        if (live_mutations and request.method in {'POST', 'PATCH'} and
+                session.is_live() and
+                request.headers.get('x-chirp-confirm-live') != 'true'):
+            return JSONResponse(
+                    {'detail': 'Confirm that this edit will be applied '
+                               'immediately to the live radio.'},
+                    status_code=409)
+        try:
+            response = await call_next(request)
+        finally:
+            if tab_token is not None:
+                session.reset_tab(tab_token)
         response.headers['Content-Security-Policy'] = (
                 "default-src 'self'; script-src 'self'; style-src 'self'; "
                 "img-src 'self' data:; connect-src 'self'; object-src "
@@ -513,9 +793,50 @@ def create_app() -> FastAPI:
     def list_radios():
         return transfers.radios()
 
+    @app.get('/api/radios/{radio_id}/prompts')
+    def radio_prompts(radio_id: str):
+        return transfers.prompts(radio_id)
+
+    @app.get('/api/transfers/prompts/upload')
+    def upload_prompts():
+        return transfers.upload_prompts()
+
     @app.get('/api/ports')
     def list_ports():
         return transfers.ports()
+
+    @app.get('/api/ports/baseline')
+    def port_baseline():
+        return {'ports': transfers.ports()}
+
+    @app.get('/api/ports/detect')
+    def detect_ports(baseline: str = Query(default='', max_length=8192)):
+        try:
+            previous = json.loads(baseline) if baseline else []
+        except json.JSONDecodeError as exc:
+            raise WebServiceError('Port baseline must be valid JSON.', 422) from exc
+        if not isinstance(previous, list) or not all(
+                isinstance(item, str) for item in previous):
+            raise WebServiceError('Port baseline must be a list of paths.',
+                                  422)
+        ports = transfers.ports()
+        known = set(previous)
+        return {'ports': ports,
+                'detected': [item for item in ports
+                             if item['port'] not in known]}
+
+    @app.get('/api/about')
+    def about():
+        try:
+            version = metadata.version('chirp-web')
+        except metadata.PackageNotFoundError:
+            version = 'development'
+        return {
+            'version': version,
+            'python': platform.python_version(),
+            'platform': platform.platform(),
+            'release_url': 'https://github.com/tmasterson/chirp-web/releases',
+        }
 
     @app.get('/api/session')
     def get_session():
@@ -523,8 +844,83 @@ def create_app() -> FastAPI:
 
     @app.post('/api/session/close')
     def close_session():
-        session.close()
-        return {'closed': True}
+        return session.close_tab()
+
+    @app.get('/api/session/tabs')
+    def get_tabs():
+        return session.tabs_summary()
+
+    @app.post('/api/session/tabs/{tab_id}/activate')
+    def activate_tab(tab_id: str):
+        return session.activate_tab(tab_id)
+
+    @app.put('/api/session/tabs')
+    def reorder_tabs(payload: TabOrder):
+        return session.reorder_tabs(payload.tab_ids)
+
+    @app.post('/api/session/subdevices/{index}')
+    def select_subdevice(index: int):
+        return session.select_subdevice(index)
+
+    @app.get('/api/session/info')
+    def get_radio_info():
+        return session.radio_info()
+
+    @app.get('/api/session/backups')
+    def get_backups():
+        return {'backups': session.backups()}
+
+    @app.get('/api/session/backups/settings')
+    def get_backup_settings():
+        return session.backup_settings()
+
+    @app.put('/api/session/backups/settings')
+    def set_backup_settings(payload: BackupStorageSettings):
+        return session.configure_backup_storage(
+                payload.directory, payload.retention)
+
+    @app.get('/api/session/backups/{backup_id}')
+    def download_backup(backup_id: str):
+        return FileResponse(
+                session.backup_path(backup_id),
+                filename=f'{backup_id}.img',
+                media_type='application/octet-stream')
+
+    @app.post('/api/session/backups/{backup_id}/restore')
+    def restore_backup(backup_id: str):
+        return session.restore_backup(backup_id)
+
+    @app.delete('/api/session/backups/{backup_id}')
+    def delete_backup(backup_id: str):
+        return session.delete_backup(backup_id)
+
+    @app.get('/api/session/diagnostics')
+    def download_diagnostics():
+        return Response(
+                session.diagnostic_bundle(),
+                media_type='application/zip',
+                headers={'Content-Disposition':
+                         'attachment; filename="chirp-web-diagnostics.zip"'})
+
+    @app.get('/api/session/report-manifest')
+    def get_report_manifest():
+        return session.report_manifest()
+
+    @app.post('/api/session/report')
+    def download_support_report(payload: SupportReportRequest):
+        return Response(
+                session.support_report(payload.include),
+                media_type='application/zip',
+                headers={'Content-Disposition':
+                         'attachment; filename="chirp-web-support.zip"'})
+
+    @app.post('/api/session/recovery/export')
+    def export_recovery():
+        return session.recovery_export()
+
+    @app.post('/api/session/recovery/import')
+    def import_recovery(payload: RecoveryImport):
+        return session.recovery_import(payload.tabs)
 
     @app.get('/api/configurations')
     def list_configurations():
@@ -597,49 +993,37 @@ def create_app() -> FastAPI:
                 payload.params['country'] not in ('US', 'CA')):
             raise WebServiceError(
                     'RadioReference country must be US or CA.', 422)
-        status = SourceQueryStatus()
         params = dict(payload.params)
-        try:
-            radio = source['radio']()
-            if source_id == 'radioreference':
-                username = params.pop('username')
-                password = params.pop('password')
-                cast(RadioReferenceSourceRadio, radio).set_auth(
-                        username, password)
-            radio.do_fetch(status, params)
-            low, high = radio.get_features().memory_bounds
-            memories = []
-            if high >= low:
-                for number in range(low, high + 1):
-                    memory = radio.get_memory(number)
-                    if not memory.empty:
-                        memories.append(memory)
-        except Exception as exc:
-            LOG.exception('Network source %s query failed', source_id)
-            raise WebServiceError(
-                    'The selected source query failed.', 502) from exc
-        if status.failures:
-            raise WebServiceError(status.failures[-1], 502)
-        if not status.ended:
-            raise WebServiceError(
-                    'The selected source did not complete its query.', 502)
+        return source_queries.start(
+                source_id, source, params, session.active_tab_id)
 
-        query_id = session.remember_source_results(memories)
-        return {
-            'query_id': query_id,
-            'source': source['name'],
-            'count': len(memories),
-            'memories': [
-                {**session._memory_dict(memory), 'number': index}
-                for index, memory in enumerate(memories)
-            ],
-            'status': status.updates[-1] if status.updates else None,
-        }
+    @app.get('/api/sources/jobs/{job_id}')
+    def source_query_status(job_id: str):
+        return source_queries.get(job_id)
+
+    @app.delete('/api/sources/jobs/{job_id}')
+    def cancel_source_query(job_id: str):
+        return source_queries.cancel(job_id)
+
+    @app.get('/api/sources/history')
+    def source_history():
+        return source_queries.history_summary()
+
+    @app.post('/api/sources/history/{history_id}/retry')
+    def retry_source_query(history_id: str):
+        return source_queries.retry(
+                history_id, SOURCE_CATALOG, session.active_tab_id)
 
     @app.post('/api/sources/import')
     def import_source_results(payload: SourceImport):
-        return session.import_source_results(
-                payload.query_id, payload.selected)
+        try:
+            return session.import_source_results(
+                    payload.query_id, payload.selected)
+        except WebServiceError as exc:
+            if exc.status_code != 404:
+                raise
+            return source_queries.import_results(
+                    payload.query_id, payload.selected)
 
     @app.post('/api/session/compare')
     def compare_image(payload: ImportImageRequest):
@@ -653,6 +1037,14 @@ def create_app() -> FastAPI:
             raise WebServiceError(
                     'The selected file could not be read as a radio image.',
                     422) from exc
+
+    @app.post('/api/session/compare-tab')
+    def compare_tab_memories(payload: TabMemoryCompare):
+        numbers = [
+            int(number) if isinstance(number, str) and number.isdecimal()
+            else number for number in payload.numbers
+        ]
+        return session.compare_tab_memories(payload.tab_id, numbers)
 
     @app.post('/api/session/open')
     def open_image(payload: OpenImageRequest):
@@ -686,6 +1078,14 @@ def create_app() -> FastAPI:
         return session.memories(
                 (0 if filtered else low) if start is None else start,
                 limit, search, sort, direction, hide_empty)
+
+    @app.post('/api/memories/query')
+    def query_memories(payload: MemoryQuery):
+        return session.memories(
+                payload.start, payload.limit, sort=payload.sort,
+                direction=payload.direction, hide_empty=payload.hide_empty,
+                filters=[item.model_dump() for item in payload.filters],
+                match=payload.match)
 
     @app.post('/api/memories/delete')
     def delete_memories(payload: MemoryDelete):
@@ -801,11 +1201,40 @@ def create_app() -> FastAPI:
                 headers={'Content-Disposition':
                          'attachment; filename="channels.csv"'})
 
+    @app.post('/api/session/export.csv')
+    def export_scoped_csv(payload: MemoryScope):
+        numbers = [
+            int(number) if isinstance(number, str) and number.isdecimal()
+            else number for number in payload.numbers
+        ]
+        return Response(
+                session.export_csv(
+                    payload.scope, numbers,
+                    [item.model_dump() for item in payload.filters],
+                    payload.match, payload.search, payload.sort,
+                    payload.direction, payload.hide_empty),
+                media_type='text/csv',
+                headers={'Content-Disposition':
+                         'attachment; filename="channels.csv"'})
+
+    @app.post('/api/session/print')
+    def print_memories(payload: MemoryScope):
+        numbers = [
+            int(number) if isinstance(number, str) and number.isdecimal()
+            else number for number in payload.numbers
+        ]
+        return session.print_rows(
+                payload.scope, numbers,
+                [item.model_dump() for item in payload.filters],
+                payload.match, payload.search, payload.sort,
+                payload.direction, payload.hide_empty)
+
     @app.post('/api/session/import')
     def import_image(payload: ImportImageRequest):
         try:
             return session.import_image_memories(
-                    payload.filename, payload.data_base64)
+                    payload.filename, payload.data_base64,
+                    payload.placement, payload.destination_start)
         except WebServiceError:
             raise
         except Exception as exc:
@@ -820,16 +1249,22 @@ def create_app() -> FastAPI:
                 'download',
                 payload.radio_id,
                 payload.port,
-                confirm_replace=payload.confirm_replace)
+                confirm_replace=payload.confirm_replace,
+                confirm_prompts=payload.confirm_prompts)
 
     @app.post('/api/transfers/upload')
     def upload_radio(payload: UploadRequest):
         return transfers.start(
-                'upload', '', payload.port, confirm=payload.confirm)
+                'upload', '', payload.port, confirm=payload.confirm,
+                confirm_prompts=payload.confirm_prompts)
 
     @app.get('/api/transfers/{job_id}')
     def transfer_status(job_id: str):
         return transfers.get(job_id)
+
+    @app.delete('/api/transfers/{job_id}')
+    def cancel_transfer(job_id: str):
+        return transfers.cancel(job_id)
 
     return app
 

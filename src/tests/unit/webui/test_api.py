@@ -4,6 +4,8 @@ import base64
 import csv
 import io
 import time
+import threading
+import zipfile
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -55,6 +57,20 @@ def csv_image_with_memories(memories):
             if field != 'Power'
         ])
     return base64.b64encode(output.getvalue().encode()).decode('ascii')
+
+
+def source_result(client, response):
+    """Wait for one asynchronous source query to finish."""
+    assert response.status_code == 200
+    job_id = response.json()['id']
+    deadline = time.monotonic() + 3
+    while time.monotonic() < deadline:
+        job = client.get(f'/api/sources/jobs/{job_id}').json()
+        if job['state'] != 'running':
+            assert job['state'] == 'complete', job
+            return job['result']
+        time.sleep(0.01)
+    raise AssertionError('Source query did not finish')
 
 
 class SimpleBankModel(chirp_common.BankModel):
@@ -148,7 +164,7 @@ def test_home_and_loopback_request_guard(client):
     """Serve the home page but reject remote hosts and cross-origin callers."""
     home = client.get('/')
     assert home.status_code == 200
-    assert 'CHIRP Web Web' in home.text
+    assert '<title data-i18n="pageTitle">CHIRP Web</title>' in home.text
     sources = client.get('/api/sources')
     assert sources.status_code == 200
     assert {source['id'] for source in sources.json()} == {
@@ -165,6 +181,9 @@ def test_home_and_loopback_request_guard(client):
             '/', headers={'origin': 'https://radio.example'})
     assert wrong_origin.status_code == 403
     assert home.headers['X-Content-Type-Options'] == 'nosniff'
+    about = client.get('/api/about')
+    assert about.status_code == 200
+    assert about.json()['release_url'].startswith('https://')
 
 
 def test_open_edit_and_save_csv_image(client):
@@ -198,6 +217,194 @@ def test_open_edit_and_save_csv_image(client):
     assert rows[1][1] == 'REPEATER'
     assert rows[1][2] == '145.500000'
     assert client.get('/api/session').json()['dirty'] is False
+
+
+def test_image_tabs_keep_independent_images_and_histories(client):
+    """Keep server-owned images and undo state independent per tab."""
+    first = client.post('/api/session/open', json={
+        'filename': 'first.csv', 'data_base64': csv_image(),
+    }).json()
+    assert client.patch('/api/memories/0', json={'name': 'FIRST'}).status_code == 200
+    second = client.post('/api/session/open', json={
+        'filename': 'second.csv', 'data_base64': csv_image(),
+        'confirm_replace': True,
+    }).json()
+    assert second['tab_id'] != first['tab_id']
+    tabs = client.get('/api/session/tabs').json()
+    assert {tab['filename'] for tab in tabs['tabs']} == {
+        'first.csv', 'second.csv',
+    }
+    restored = client.post(
+        f"/api/session/tabs/{first['tab_id']}/activate").json()
+    assert restored['tab_id'] == first['tab_id']
+    assert client.get('/api/memories?start=0&limit=1').json()[
+        'memories'][0]['name'] == 'FIRST'
+    assert client.post('/api/session/undo').status_code == 200
+
+
+def test_tabs_can_be_reordered_and_request_scoped(client):
+    """Keep the request's image tab selected while preserving its order."""
+    first = client.post('/api/session/open', json={
+        'filename': 'first.csv', 'data_base64': csv_image(),
+    }).json()
+    second = client.post('/api/session/open', json={
+        'filename': 'second.csv', 'data_base64': csv_image(),
+        'confirm_replace': True,
+    }).json()
+    ordered = client.put('/api/session/tabs', json={
+        'tab_ids': [second['tab_id'], first['tab_id']],
+    })
+    assert ordered.status_code == 200
+    assert [tab['id'] for tab in ordered.json()['tabs']] == [
+        second['tab_id'], first['tab_id']]
+    scoped = client.get('/api/session', headers={
+        'X-Chirp-Tab': first['tab_id'],
+    })
+    assert scoped.status_code == 200
+    assert scoped.json()['tab_id'] == first['tab_id']
+
+
+def test_subdevice_selection_changes_the_editing_context(client):
+    """Select each sub-device without discarding the parent image tab."""
+    class ModuleA(FakeLiveRadio):
+        MODEL = 'Module A'
+
+    class ModuleB(FakeLiveRadio):
+        MODEL = 'Module B'
+
+    class ParentRadio(FakeLiveRadio):
+        def __init__(self):
+            super().__init__(None)
+            self.children = [ModuleA(None), ModuleB(None)]
+
+        def get_features(self):
+            features = super().get_features()
+            features.has_sub_devices = True
+            return features
+
+        def get_sub_devices(self):
+            return self.children
+
+    client.app.state.session._replace_radio(ParentRadio(), 'parent.img', None)
+    session = client.get('/api/session')
+    assert [item['name'] for item in session.json()['subdevices']] == [
+        'CHIRP Module A', 'CHIRP Module B']
+    switched = client.post('/api/session/subdevices/1')
+    assert switched.status_code == 200
+    assert switched.json()['selected_subdevice'] == 1
+    assert switched.json()['name'] == 'CHIRP Module B'
+
+
+def test_selected_memories_can_be_compared_between_open_tabs(client):
+    """Expose field-level differences for a channel in another image tab."""
+    first = chirp_common.Memory(0)
+    first.name, first.freq = 'FIRST', 146520000
+    second = chirp_common.Memory(0)
+    second.name, second.freq = 'SECOND', 147000000
+    left = client.post('/api/session/open', json={
+        'filename': 'left.csv',
+        'data_base64': csv_image_with_memories([first]),
+    }).json()
+    client.post('/api/session/open', json={
+        'filename': 'right.csv',
+        'data_base64': csv_image_with_memories([second]),
+        'confirm_replace': True,
+    })
+    compared = client.post('/api/session/compare-tab', json={
+        'tab_id': left['tab_id'], 'numbers': [0],
+    })
+    assert compared.status_code == 200
+    assert compared.json()['comparisons'][0]['changes']['name'] == {
+        'current': 'SECOND', 'other': 'FIRST'}
+
+
+def test_radio_info_diagnostics_and_structured_filters(client):
+    """Expose safe support information and validated advanced filters."""
+    assert client.post('/api/session/open', json={
+        'filename': 'channels.csv', 'data_base64': csv_image(),
+    }).status_code == 200
+    info = client.get('/api/session/info')
+    assert info.status_code == 200
+    assert info.json()['driver']['class'] == 'CSVRadio'
+    bundle = client.get('/api/session/diagnostics')
+    assert bundle.status_code == 200
+    with zipfile.ZipFile(io.BytesIO(bundle.content)) as archive:
+        assert 'radio-info.json' in archive.namelist()
+        assert 'serial-trace.txt' in archive.namelist()
+        assert 'mem_extra' not in archive.read('radio-info.json').decode()
+    filtered = client.post('/api/memories/query', json={
+        'filters': [{
+            'field': 'name', 'operator': 'contains', 'value': 'TES',
+        }],
+    })
+    assert filtered.status_code == 200
+    assert filtered.json()['total'] == 1
+
+
+def test_support_report_and_recovery_are_explicit_and_local(client):
+    """Let users review support files and restore downloaded image drafts."""
+    opened = client.post('/api/session/open', json={
+        'filename': 'channels.csv', 'data_base64': csv_image(),
+    })
+    assert opened.status_code == 200
+    manifest = client.get('/api/session/report-manifest')
+    assert manifest.status_code == 200
+    assert {item['id'] for item in manifest.json()['files']} == {
+        'radio-info', 'serial-trace', 'backups',
+    }
+    report = client.post('/api/session/report', json={
+        'include': ['radio-info', 'serial-trace'],
+    })
+    assert report.status_code == 200
+    with zipfile.ZipFile(io.BytesIO(report.content)) as archive:
+        assert set(archive.namelist()) == {
+            'radio-info.json', 'serial-trace.txt',
+        }
+    recovery = client.post('/api/session/recovery/export')
+    assert recovery.status_code == 200
+    assert recovery.json()['tabs'][0]['filename'] == 'channels.csv'
+    assert client.post('/api/session/close').status_code == 200
+    restored = client.post('/api/session/recovery/import', json={
+        'tabs': recovery.json()['tabs'],
+    })
+    assert restored.status_code == 200
+    assert client.get('/api/memories?start=0&limit=1').json()[
+        'memories'][0]['name'] == 'TEST'
+
+
+def test_port_detection_and_explicit_local_ports(client, monkeypatch):
+    """Expose plug-in detection and permit explicit local serial paths."""
+    monkeypatch.setattr(
+            service.TransferManager, 'ports',
+            staticmethod(lambda: [{
+                'port': '/dev/ttyUSB0', 'description': 'First port',
+            }, {
+                'port': '/dev/ttyUSB1', 'description': 'New port',
+            }]))
+    detected = client.get('/api/ports/detect', params={
+        'baseline': '["/dev/ttyUSB0"]',
+    })
+    assert detected.status_code == 200
+    assert detected.json()['detected'] == [{
+        'port': '/dev/ttyUSB1', 'description': 'New port',
+    }]
+    assert service.TransferManager.valid_port('/dev/custom-radio')
+    assert service.TransferManager.valid_port('COM42')
+    assert not service.TransferManager.valid_port('not-a-port')
+
+
+def test_connected_live_radio_requires_explicit_edit_confirmation(client):
+    """Reject live changes until the browser confirms their immediate write."""
+    radio = FakeLiveRadio(None)
+    client.app.state.session._replace_radio(radio, 'live.radio', None)
+    client.app.state.session._tab.live_port = SimpleNamespace(is_open=True)
+    rejected = client.patch('/api/memories/1', json={'name': 'LIVE'})
+    assert rejected.status_code == 409
+    accepted = client.patch(
+        '/api/memories/1', json={'name': 'LIVE'},
+        headers={'X-Chirp-Confirm-Live': 'true'})
+    assert accepted.status_code == 200
+    assert radio.get_memory(1).name == 'LIVE'
 
 
 def test_memory_change_can_be_undone_and_redone(client):
@@ -348,17 +555,16 @@ def test_satellite_sources_use_mocked_public_apis(client, monkeypatch):
         raise AssertionError(f'Unexpected URL: {url}')
 
     monkeypatch.setattr(satellites.requests, 'get', get)
-    amsat = client.post('/api/sources/amsat/query', json={'params': {}})
-    assert amsat.status_code == 200
-    assert amsat.json()['memories'][0]['name'] == 'TestSat'
-    assert amsat.json()['memories'][0]['freq'] == 145850000
+    amsat = source_result(
+        client, client.post('/api/sources/amsat/query', json={'params': {}}))
+    assert amsat['memories'][0]['name'] == 'TestSat'
+    assert amsat['memories'][0]['freq'] == 145850000
 
-    satnogs = client.post('/api/sources/satnogs/query', json={
+    satnogs = source_result(client, client.post('/api/sources/satnogs/query', json={
         'params': {'modes': ['FM']},
-    })
-    assert satnogs.status_code == 200
-    assert satnogs.json()['memories'][0]['name'] == 'Orbiter VHF'
-    assert satnogs.json()['memories'][0]['mode'] == 'NFM'
+    }))
+    assert satnogs['memories'][0]['name'] == 'Orbiter VHF'
+    assert satnogs['memories'][0]['mode'] == 'NFM'
 
 
 def test_mapy73_source_parses_mocked_csv_snapshot(client, monkeypatch):
@@ -377,11 +583,10 @@ def test_mapy73_source_parses_mocked_csv_snapshot(client, monkeypatch):
         return Response()
 
     monkeypatch.setattr(mapy73pl.requests, 'get', get)
-    response = client.post('/api/sources/mapy73/query', json={
+    response = source_result(client, client.post('/api/sources/mapy73/query', json={
         'params': {'api_option': 'pl-fmpoland'},
-    })
-    assert response.status_code == 200
-    assert response.json()['memories'][0]['name'] == 'TEST'
+    }))
+    assert response['memories'][0]['name'] == 'TEST'
 
 
 def test_search_delete_and_export_csv(client):
@@ -482,6 +687,107 @@ def test_import_file_extends_unbounded_csv_image(client):
             'memories'][0]['name'] == 'TEST'
 
 
+def test_import_file_supports_matching_append_and_destination_range(client):
+    """Place file imports explicitly without changing the safe default."""
+    original = chirp_common.Memory(0)
+    original.name, original.freq = 'ORIGINAL', 146520000
+    occupied = chirp_common.Memory(3)
+    occupied.name, occupied.freq = 'OCCUPIED', 146620000
+    imported_memory = chirp_common.Memory(0)
+    imported_memory.name, imported_memory.freq = 'IMPORTED', 146720000
+    assert client.post('/api/session/open', json={
+        'filename': 'channels.csv',
+        'data_base64': csv_image_with_memories([original, occupied]),
+    }).status_code == 200
+    payload = {
+        'filename': 'source.csv',
+        'data_base64': csv_image_with_memories([imported_memory]),
+    }
+
+    matching = client.post('/api/session/import', json={
+        **payload, 'placement': 'matching',
+    })
+    assert matching.status_code == 200
+    assert client.get('/api/memories?start=0&limit=1').json()[
+        'memories'][0]['name'] == 'IMPORTED'
+
+    appended = client.post('/api/session/import', json={
+        **payload, 'placement': 'append',
+    })
+    assert appended.status_code == 200
+    assert client.get('/api/memories?start=4&limit=1').json()[
+        'memories'][0]['name'] == 'IMPORTED'
+
+    ranged = client.post('/api/session/import', json={
+        **payload, 'placement': 'range', 'destination_start': 3,
+    })
+    assert ranged.status_code == 200
+    assert client.get('/api/memories?start=3&limit=1').json()[
+        'memories'][0]['name'] == 'IMPORTED'
+
+
+def test_print_and_csv_export_use_selected_or_filtered_scopes(client):
+    """Keep print preview and CSV download aligned with the chosen scope."""
+    first = chirp_common.Memory(0)
+    first.name, first.freq = 'ALPHA', 146520000
+    second = chirp_common.Memory(1)
+    second.name, second.freq = 'BRAVO', 147000000
+    assert client.post('/api/session/open', json={
+        'filename': 'channels.csv',
+        'data_base64': csv_image_with_memories([first, second]),
+    }).status_code == 200
+
+    printed = client.post('/api/session/print', json={
+        'scope': 'selected', 'numbers': [1],
+    })
+    assert printed.status_code == 200
+    assert [memory['name'] for memory in printed.json()['memories']] == [
+        'BRAVO']
+
+    exported = client.post('/api/session/export.csv', json={
+        'scope': 'filtered',
+        'filters': [{
+            'field': 'name', 'operator': 'contains', 'value': 'alp',
+        }],
+    })
+    assert exported.status_code == 200
+    rows = list(csv.DictReader(io.StringIO(exported.text)))
+    assert [row['Name'] for row in rows] == ['ALPHA']
+
+
+def test_retained_backups_are_opt_in_and_can_be_restored_or_deleted(
+        client, tmp_path):
+    """Keep configured backups locally until the user restores or deletes."""
+    class BackupRadio(chirp_common.CloneModeRadio):
+        def get_features(self):
+            features = chirp_common.RadioFeatures()
+            features.memory_bounds = (0, 0)
+            return features
+
+        def save_mmap(self, filename):
+            Path(filename).write_bytes(base64.b64decode(csv_image()))
+
+    session = client.app.state.session
+    session._replace_radio(BackupRadio(None), 'program.csv', None)
+    configured = client.put('/api/session/backups/settings', json={
+        'directory': str(tmp_path), 'retention': 2,
+    })
+    assert configured.status_code == 200
+    assert configured.json()['retention'] == 2
+    session.create_backup('upload')
+    backups = client.get('/api/session/backups').json()['backups']
+    retained = next(item for item in backups if item['persistent'])
+    assert (tmp_path / retained['id']).is_file()
+
+    restored = client.post(
+        f"/api/session/backups/{retained['id']}/restore")
+    assert restored.status_code == 200
+    assert restored.json()['filename'] == 'program.csv'
+    deleted = client.delete(f"/api/session/backups/{retained['id']}")
+    assert deleted.status_code == 200
+    assert not (tmp_path / retained['id']).exists()
+
+
 def test_network_source_query_and_import(client, monkeypatch):
     """Search a network source and import selected results into empty slots."""
     class FakeSource:
@@ -513,14 +819,13 @@ def test_network_source_query_and_import(client, monkeypatch):
     })
     assert opened.status_code == 200
 
-    queried = client.post('/api/sources/test-source/query', json={
+    queried = source_result(client, client.post('/api/sources/test-source/query', json={
         'params': {'city': 'Town'},
-    })
-    assert queried.status_code == 200
-    assert queried.json()['memories'][0]['name'] == 'Repeater'
+    }))
+    assert queried['memories'][0]['name'] == 'Repeater'
 
     imported = client.post('/api/sources/import', json={
-        'query_id': queried.json()['query_id'],
+        'query_id': queried['query_id'],
         'selected': [0],
     })
     assert imported.status_code == 200
@@ -528,6 +833,12 @@ def test_network_source_query_and_import(client, monkeypatch):
     assert client.get('/api/memories?start=1&limit=1').json()[
             'memories'][0]['name'] == 'Repeater'
     assert client.get('/api/session').json()['dirty'] is True
+    history = client.get('/api/sources/history')
+    assert history.status_code == 200
+    assert history.json()['jobs'][0]['source_id'] == 'test-source'
+    retry = client.post(
+        f"/api/sources/history/{history.json()['jobs'][0]['id']}/retry")
+    assert source_result(client, retry)['count'] == 1
 
 
 def test_radioreference_query_uses_submitted_credentials(client, monkeypatch):
@@ -562,18 +873,20 @@ def test_radioreference_query_uses_submitted_credentials(client, monkeypatch):
                 'help': '',
             })
 
-    response = client.post('/api/sources/radioreference/query', json={
+    response = source_result(client, client.post('/api/sources/radioreference/query', json={
         'params': {
             'username': 'operator',
             'password': 'secret',
             'country': 'US',
             'zipcounty': '90210',
         },
-    })
+    }))
 
-    assert response.status_code == 200
-    assert response.json()['memories'][0]['name'] == 'Private result'
-    assert 'secret' not in response.text
+    assert response['memories'][0]['name'] == 'Private result'
+    assert 'secret' not in str(response)
+    history = client.get('/api/sources/history').json()['jobs'][0]
+    assert 'password' not in history['params']
+    assert 'username' not in history['params']
 
 
 def test_replacing_unsaved_image_requires_confirmation(client):
@@ -945,6 +1258,74 @@ def test_download_runs_as_job_and_opens_image(client, monkeypatch):
     assert session['name'] == 'Test WebRadio'
     assert session['filename'] == 'Test WebRadio.img'
     assert session['supports_upload'] is True
+
+
+def test_transfer_prompts_require_confirmation_and_jobs_can_cancel(
+        client, monkeypatch):
+    """Require driver instructions and cancel a blocked serial operation."""
+    started = threading.Event()
+    stopped = threading.Event()
+
+    class FakeSerial:
+        is_open = True
+
+        def __init__(self, **kwargs):
+            self.port = kwargs['port']
+
+        def close(self):
+            self.is_open = False
+            stopped.set()
+
+    class PromptRadio(chirp_common.CloneModeRadio):
+        VENDOR = 'Test'
+        MODEL = 'PromptRadio'
+
+        @classmethod
+        def get_prompts(cls):
+            prompts = chirp_common.RadioPrompts()
+            prompts.pre_download = 'Put the radio in clone mode.'
+            return prompts
+
+        def sync_in(self):
+            started.set()
+            assert stopped.wait(3)
+            raise RuntimeError('serial port closed')
+
+        def get_features(self):
+            features = chirp_common.RadioFeatures()
+            features.memory_bounds = (0, 0)
+            return features
+
+    radio_id = 'Test_PromptRadio'
+    monkeypatch.setitem(service.directory.DRV_TO_RADIO, radio_id, PromptRadio)
+    monkeypatch.setattr(
+            service.TransferManager, 'ports',
+            staticmethod(lambda: [{'port': '/dev/fake-radio'}]))
+    monkeypatch.setattr(service.serial, 'Serial', FakeSerial)
+
+    prompts = client.get(f'/api/radios/{radio_id}/prompts')
+    assert prompts.status_code == 200
+    assert prompts.json()['download']['pre_download']
+    rejected = client.post('/api/transfers/download', json={
+        'radio_id': radio_id, 'port': '/dev/fake-radio',
+    })
+    assert rejected.status_code == 409
+    started_job = client.post('/api/transfers/download', json={
+        'radio_id': radio_id, 'port': '/dev/fake-radio',
+        'confirm_prompts': True,
+    })
+    assert started_job.status_code == 200
+    assert started.wait(3)
+    cancelled = client.delete(f"/api/transfers/{started_job.json()['id']}")
+    assert cancelled.status_code == 200
+    deadline = time.monotonic() + 3
+    while time.monotonic() < deadline:
+        status = client.get(
+            f"/api/transfers/{started_job.json()['id']}").json()
+        if status['state'] != 'running':
+            break
+        time.sleep(0.01)
+    assert status['state'] == 'cancelled'
 
 
 def test_upload_requires_confirmation_and_runs_job(client, monkeypatch):

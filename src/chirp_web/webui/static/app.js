@@ -23,11 +23,16 @@ const state = {
   pageMemories: [],
   selected: new Set(),
   search: '',
+  filters: [],
+  filterMatch: 'all',
   sort: 'number',
   direction: 'asc',
   hideEmpty: false,
   txFrequencyWorkflow: false,
-  columns: { name: true, frequency: true, mode: true, shift: true, tone: true },
+  columns: {
+    name: true, frequency: true, mode: true, shift: true, tone: true,
+    power: false, comment: false, extra: false,
+  },
   autoBandplanEdits: false,
   memoryRequest: 0,
   busy: false,
@@ -41,16 +46,189 @@ const state = {
   clipboardId: null,
   tabs: [],
   activeTabId: null,
+  language: 'en',
+  sourceJob: null,
+  transferJob: null,
+  focusedMemory: null,
+  columnRadioId: null,
 };
 
 const $ = (selector) => document.querySelector(selector);
 const notice = $('#notice');
 const PREFERENCES_KEY = 'chirp-web-view-preferences';
+const CONNECTION_PREFERENCES_KEY = 'chirp-web-connection-preferences';
+const CONNECTION_PROFILES_KEY = 'chirp-web-connection-profiles';
+const IMAGE_EXTENSIONS = /\.(img|csv|icf|dat|icf_ll)$/i;
+const translations = {
+  en: {
+    pageTitle: 'CHIRP Web',
+    localSession: 'LOCAL SESSION',
+    about: 'About',
+    aboutChirp: 'About CHIRP Web',
+    checkReleases: 'Check for releases',
+    introEyebrow: 'RADIO PROGRAMMING, SIMPLIFIED',
+    introTitle: 'Make your next channel change count.',
+    introText: 'Work with a radio image, shape your channel list, and transfer it when you’re ready.',
+    chooseFile: 'Choose a file',
+    fileTypes: 'IMG, CSV, ICF and supported formats · up to 20 MB',
+    mergeFile: 'Merge channels from file',
+    compareFile: 'Compare / copy from image',
+    connectionProfiles: 'Connection profiles',
+    chooseProfile: 'Choose a profile…',
+    useProfile: 'Use',
+    delete: 'Delete',
+    profileNamePlaceholder: 'Profile name',
+    profileNotes: 'Notes',
+    profileNotesPlaceholder: 'Notes (stored only in this browser)',
+    saveProfile: 'Save profile',
+    exportProfiles: 'Export profiles',
+    importProfiles: 'Import profiles',
+    sourceHistoryEyebrow: 'SOURCE ACTIVITY',
+    sourceHistory: 'Recent source jobs',
+    refresh: 'Refresh',
+    retry: 'Retry',
+    sourceJobRestarted: 'Source job restarted.',
+    sourceHistoryEmpty: 'No recent source jobs.',
+    footer: 'CHIRP Web · Your radio data stays on this computer.',
+    profileSaved: 'Connection profile saved.',
+    profileDeleted: 'Connection profile deleted.',
+    profileLoaded: 'Connection profile loaded.',
+    profilesImported: 'Connection profiles imported.',
+    profilesExported: 'Connection profiles exported.',
+    profileNameRequired: 'Enter a profile name.',
+    droppedOpen: 'Opening dropped image…',
+    droppedImport: 'Merging dropped channels…',
+    droppedCompare: 'Comparing dropped image…',
+    invalidImageFile: 'Choose a supported image file (IMG, CSV, ICF, or DAT).',
+    imageTooLarge: 'Choose an image smaller than 20 MB.',
+    importTooLarge: 'Choose a channel file smaller than 20 MB.',
+    openDestinationFirst: 'Open a destination image before merging channels.',
+    shortcutOpen: 'Open image file picker.',
+    shortcutSave: 'Saving image.',
+    shortcutSearch: 'Channel search focused.',
+    shortcutUndo: 'Undoing latest change.',
+    shortcutRedo: 'Redoing latest change.',
+    shortcutSelect: 'Visible channels selected.',
+    shortcutCopy: 'Copying selected channels.',
+    shortcutCut: 'Cutting selected channels.',
+    shortcutPaste: 'Paste destination focused.',
+    manualPort: 'Or enter a serial port',
+    manualPortPlaceholder: '/dev/ttyUSB0 or COM3',
+    scanUsb: 'Scan for USB radios',
+    scanningUsb: 'Scanning USB ports…',
+    scanComplete: 'USB scan complete.',
+    languageChanged: 'Language updated.',
+    supportReport: 'Support report',
+    recoveryExport: 'Export recovery',
+    recoveryRestore: 'Restore recovery',
+    cancel: 'Cancel',
+    downloadReport: 'Download report',
+    reportReady: 'Support report downloaded.',
+    recoveryExported: 'Recovery file downloaded.',
+    recoveryRestored: 'Recovery restored.',
+    sourceSearching: 'Searching the network source…',
+    sourceCancelled: 'Source search cancelled.',
+    cancelSearch: 'Cancel search',
+    readRadio: 'Read radio',
+    writeRadio: 'Write to radio',
+    searchSource: 'Search source',
+  },
+  es: {
+    pageTitle: 'CHIRP Web',
+    localSession: 'SESIÓN LOCAL',
+    about: 'Acerca de',
+    aboutChirp: 'Acerca de CHIRP Web',
+    checkReleases: 'Buscar versiones',
+    introEyebrow: 'PROGRAMACIÓN DE RADIO, SIMPLIFICADA',
+    introTitle: 'Haz que tu próximo cambio de canal cuente.',
+    introText: 'Trabaja con una imagen de radio, organiza tu lista de canales y transfiérela cuando estés listo.',
+    chooseFile: 'Elegir un archivo',
+    fileTypes: 'IMG, CSV, ICF y formatos compatibles · hasta 20 MB',
+    mergeFile: 'Combinar canales desde archivo',
+    compareFile: 'Comparar / copiar desde imagen',
+    connectionProfiles: 'Perfiles de conexión',
+    chooseProfile: 'Elige un perfil…',
+    useProfile: 'Usar',
+    delete: 'Eliminar',
+    profileNamePlaceholder: 'Nombre del perfil',
+    profileNotes: 'Notas',
+    profileNotesPlaceholder: 'Notas (guardadas solo en este navegador)',
+    saveProfile: 'Guardar perfil',
+    exportProfiles: 'Exportar perfiles',
+    importProfiles: 'Importar perfiles',
+    sourceHistoryEyebrow: 'ACTIVIDAD DE FUENTES',
+    sourceHistory: 'Trabajos recientes de fuentes',
+    refresh: 'Actualizar',
+    retry: 'Reintentar',
+    sourceJobRestarted: 'Trabajo de fuente reiniciado.',
+    sourceHistoryEmpty: 'No hay trabajos recientes de fuentes.',
+    footer: 'CHIRP Web · Los datos de tu radio permanecen en este equipo.',
+    profileSaved: 'Perfil de conexión guardado.',
+    profileDeleted: 'Perfil de conexión eliminado.',
+    profileLoaded: 'Perfil de conexión cargado.',
+    profilesImported: 'Perfiles de conexión importados.',
+    profilesExported: 'Perfiles de conexión exportados.',
+    profileNameRequired: 'Introduce un nombre de perfil.',
+    droppedOpen: 'Abriendo imagen soltada…',
+    droppedImport: 'Combinando canales soltados…',
+    droppedCompare: 'Comparando imagen soltada…',
+    invalidImageFile: 'Elige un archivo de imagen compatible (IMG, CSV, ICF o DAT).',
+    imageTooLarge: 'Elige una imagen de menos de 20 MB.',
+    importTooLarge: 'Elige un archivo de canales de menos de 20 MB.',
+    openDestinationFirst: 'Abre una imagen de destino antes de combinar canales.',
+    shortcutOpen: 'Selector de imagen abierto.',
+    shortcutSave: 'Guardando imagen.',
+    shortcutSearch: 'Búsqueda de canales enfocada.',
+    shortcutUndo: 'Deshaciendo el último cambio.',
+    shortcutRedo: 'Rehaciendo el último cambio.',
+    shortcutSelect: 'Canales visibles seleccionados.',
+    shortcutCopy: 'Copiando canales seleccionados.',
+    shortcutCut: 'Cortando canales seleccionados.',
+    shortcutPaste: 'Destino de pegado enfocado.',
+    manualPort: 'O introduzca un puerto serie',
+    manualPortPlaceholder: '/dev/ttyUSB0 o COM3',
+    scanUsb: 'Buscar radios USB',
+    scanningUsb: 'Buscando puertos USB…',
+    scanComplete: 'Búsqueda USB terminada.',
+    languageChanged: 'Idioma actualizado.',
+    supportReport: 'Informe de soporte',
+    recoveryExport: 'Exportar recuperación',
+    recoveryRestore: 'Restaurar recuperación',
+    cancel: 'Cancelar',
+    downloadReport: 'Descargar informe',
+    reportReady: 'Informe de soporte descargado.',
+    recoveryExported: 'Archivo de recuperación descargado.',
+    recoveryRestored: 'Recuperación restaurada.',
+    sourceSearching: 'Buscando en la fuente de red…',
+    sourceCancelled: 'Búsqueda de fuente cancelada.',
+    cancelSearch: 'Cancelar búsqueda',
+    readRadio: 'Leer radio',
+    writeRadio: 'Escribir en radio',
+    searchSource: 'Buscar fuente',
+  },
+};
+
+function t(key) {
+  return translations[state.language]?.[key] || translations.en[key] || key;
+}
+
+function applyTranslations() {
+  document.documentElement.lang = state.language;
+  document.querySelectorAll('[data-i18n]').forEach((element) => {
+    element.textContent = t(element.dataset.i18n);
+  });
+  document.querySelectorAll('[data-i18n-placeholder]').forEach((element) => {
+    element.placeholder = t(element.dataset.i18nPlaceholder);
+  });
+  $('#downloadButton').textContent = t('readRadio');
+  $('#uploadButton').textContent = t('writeRadio');
+  $('#querySource').textContent = t('searchSource');
+  $('#cancelSourceQuery').textContent = t('cancelSearch');
+  $('#languageSelect').value = state.language;
+}
 
 function loadPreferences() {
-  const raw = localStorage.getItem(PREFERENCES_KEY);
-  if (!raw) return;
-  const saved = JSON.parse(raw);
+  const saved = loadPreferenceData();
   if (typeof saved.hideEmpty === 'boolean') state.hideEmpty = saved.hideEmpty;
   if (typeof saved.txFrequencyWorkflow === 'boolean') {
     state.txFrequencyWorkflow = saved.txFrequencyWorkflow;
@@ -63,6 +241,27 @@ function loadPreferences() {
       state.columns[column] = saved.columns[column];
     }
   }
+  if (translations[saved.language]) state.language = saved.language;
+}
+
+function loadPreferenceData() {
+  try {
+    return JSON.parse(localStorage.getItem(PREFERENCES_KEY) || '{}');
+  } catch {
+    return {};
+  }
+}
+
+function loadColumnsForSession() {
+  if (!state.session || state.columnRadioId === state.session.name) return;
+  const saved = loadPreferenceData();
+  const columns = saved.columnsByRadio?.[state.session.name] || saved.columns;
+  if (columns) {
+    for (const column of Object.keys(state.columns)) {
+      if (typeof columns[column] === 'boolean') state.columns[column] = columns[column];
+    }
+  }
+  state.columnRadioId = state.session.name;
 }
 
 function savePreferences() {
@@ -72,22 +271,84 @@ function savePreferences() {
       txFrequencyWorkflow: state.txFrequencyWorkflow,
       autoBandplanEdits: state.autoBandplanEdits,
       columns: state.columns,
+      columnsByRadio: {
+        ...(loadPreferenceData().columnsByRadio || {}),
+        ...(state.session ? { [state.session.name]: state.columns } : {}),
+      },
+      language: state.language,
     }));
   } catch (error) {
     showNotice(`Could not save view preferences: ${error.message}`, true);
   }
 }
 
+function loadConnectionPreferences() {
+    try {
+      return JSON.parse(localStorage.getItem(CONNECTION_PREFERENCES_KEY) || '{}');
+    } catch {
+      return {};
+    }
+  }
+
+function saveConnectionPreferences() {
+    try {
+      const saved = loadConnectionPreferences();
+      saved.radioId = $('#radioModel').value;
+      saved.port = selectedPort();
+      saved.recentRadioIds = [saved.radioId, ...(saved.recentRadioIds || [])]
+        .filter((value, index, values) => value && values.indexOf(value) === index)
+        .slice(0, 5);
+      saved.recentPorts = [saved.port, ...(saved.recentPorts || [])]
+        .filter((value, index, values) => value && values.indexOf(value) === index)
+        .slice(0, 5);
+      localStorage.setItem(CONNECTION_PREFERENCES_KEY, JSON.stringify(saved));
+      renderRecentPorts(saved.recentPorts);
+    } catch (error) {
+      showNotice(`Could not save connection preferences: ${error.message}`, true);
+    }
+  }
+
+function selectedPort() {
+    return $('#manualSerialPort').value.trim() || $('#serialPort').value;
+  }
+
+function renderRecentPorts(ports = loadConnectionPreferences().recentPorts || []) {
+    const list = $('#recentSerialPorts');
+    list.replaceChildren(...ports.map((port) => new Option(port)));
+}
+
 function isFilteredView() {
   return Boolean(state.search || state.sort !== 'number' ||
-    state.direction !== 'asc' || state.hideEmpty);
+    state.direction !== 'asc' || state.hideEmpty || state.filters.length);
 }
 
 async function api(path, options = {}) {
+  const route = path.split('?', 1)[0];
+  const stateful = route !== '/api/session/tabs' && (
+    route.startsWith('/api/session') ||
+    route.startsWith('/api/memories') ||
+    route.startsWith('/api/banks') ||
+    route.startsWith('/api/settings') ||
+    route.startsWith('/api/bandplans') ||
+    route.startsWith('/api/transfers') ||
+    route === '/api/sources/import'
+  );
+  const liveMutation = state.session?.is_live &&
+    ['POST', 'PATCH'].includes((options.method || 'GET').toUpperCase()) &&
+    (route !== '/api/memories/query' && (route.startsWith('/api/memories/') ||
+      ['/api/settings', '/api/banks', '/api/sources/import',
+        '/api/session/import'].includes(route)));
+  if (liveMutation && !window.confirm(
+    'Apply this change immediately to the connected live radio?')) {
+    throw new Error('Live radio edit cancelled.');
+  }
   const response = await fetch(path, {
     ...options,
     headers: {
       ...(options.body ? { 'Content-Type': 'application/json' } : {}),
+      ...(stateful && state.activeTabId
+        ? { 'X-Chirp-Tab': state.activeTabId } : {}),
+      ...(liveMutation ? { 'X-Chirp-Confirm-Live': 'true' } : {}),
       ...options.headers,
     },
   });
@@ -101,29 +362,50 @@ async function api(path, options = {}) {
 
 function showNotice(message, isError = false) {
   notice.textContent = message;
+  notice.setAttribute('role', isError ? 'alert' : 'status');
   notice.classList.toggle('error', isError);
   notice.hidden = !message;
 }
+
+document.querySelectorAll('.file-trigger').forEach((trigger) => {
+  trigger.addEventListener('keydown', (event) => {
+    if (!['Enter', ' '].includes(event.key)) return;
+    event.preventDefault();
+    document.getElementById(trigger.htmlFor)?.click();
+  });
+});
 
 function setBusy(busy) {
   state.busy = busy;
   $('#downloadButton').disabled = busy;
   $('#uploadButton').disabled = busy || !state.session;
-  $('#saveButton').disabled = busy || !state.session;
+  $('#saveButton').disabled = busy || !state.session || state.session.is_live;
   $('#imageFile').disabled = busy;
   $('#newConfiguration').disabled = busy;
   $('#configurationTemplate').disabled = busy;
   $('#importFile').disabled = busy;
   $('#exportCsv').disabled = busy || !state.session;
+  $('#showRadioInfo').disabled = busy || !state.session;
+  $('#downloadDiagnostics').disabled = busy || !state.session;
+  $('#downloadBackup').disabled = busy || !state.session;
+  $('#manageBackups').disabled = busy || !state.session;
+  $('#supportReport').disabled = busy;
+  $('#exportRecovery').disabled = busy;
+  $('#restoreRecovery').disabled = busy;
   $('#compareFile').disabled = busy || !state.session;
   $('#printChannels').disabled = busy || !state.session;
+  $('#outputScope').disabled = busy || !state.session;
+  $('#importPlacement').disabled = busy;
+  $('#importDestination').disabled = busy || $('#importPlacement').value !== 'range';
   $('#openRecent').disabled = busy || !$('#recentImages').value;
   $('#undoChange').disabled = busy || !state.history.can_undo;
   $('#redoChange').disabled = busy || !state.history.can_redo;
   $('#bandplanSelect').disabled = busy || !state.session;
   $('#radioModel').disabled = busy;
   $('#serialPort').disabled = busy;
+  $('#manualSerialPort').disabled = busy;
   $('#refreshPorts').disabled = busy;
+  $('#scanUsb').disabled = busy;
   $('#sourceName').disabled = busy;
   $('#sourceFields').querySelectorAll('input, select').forEach((control) => {
     control.disabled = busy;
@@ -142,6 +424,10 @@ function setBusy(busy) {
   $('#channelSearch').disabled = busy || !state.session;
   $('#channelSort').disabled = busy || !state.session;
   $('#channelDirection').disabled = busy || !state.session;
+  ['filterField', 'filterOperator', 'filterValue', 'filterMatch',
+    'addFilter'].forEach((id) => {
+    $(`#${id}`).disabled = busy || !state.session;
+  });
   $('#imageTabs').querySelectorAll('button').forEach((button) => {
     button.disabled = busy;
   });
@@ -149,7 +435,8 @@ function setBusy(busy) {
   $('#txFrequencyWorkflow').disabled = busy || !state.session;
   $('#autoBandplanEdits').disabled = busy || !state.session;
   ['showNameColumn', 'showFrequencyColumn', 'showModeColumn',
-    'showShiftColumn', 'showToneColumn'].forEach((id) => {
+    'showShiftColumn', 'showToneColumn', 'showPowerColumn',
+    'showCommentColumn', 'showExtraColumn'].forEach((id) => {
     $(`#${id}`).disabled = busy || !state.session;
   });
   $('#gotoChannel').disabled = busy || !state.session;
@@ -172,17 +459,33 @@ async function loadRadios() {
   radios.forEach((radio) => {
     const option = document.createElement('option');
     option.value = radio.id;
-    option.textContent = radio.name;
+    option.textContent = radio.mode === 'live'
+      ? `${radio.name} (live mode)` : radio.name;
     select.append(option);
   });
   if (!radios.length) {
-    select.add(new Option('No clone-mode radios available', ''));
+    select.add(new Option('No serial radios available', ''));
+  }
+  const saved = loadConnectionPreferences();
+  const preferred = saved.radioId || saved.recentRadioIds?.[0];
+  if ([...select.options].some((option) => option.value === preferred)) {
+    select.value = preferred;
   }
 }
 
+function portsFromResponse(response) {
+  return Array.isArray(response) ? response : response.ports || [];
+}
+
 async function loadPorts() {
-  const ports = await api('/api/ports');
+  renderPorts(await api('/api/ports'));
+}
+
+function renderPorts(response) {
+  const ports = portsFromResponse(response);
   const select = $('#serialPort');
+  const saved = loadConnectionPreferences();
+  const current = selectedPort() || saved.port;
   select.replaceChildren();
   ports.forEach((item) => {
     const option = document.createElement('option');
@@ -195,6 +498,13 @@ async function loadPorts() {
   if (!ports.length) {
     select.add(new Option('No serial ports detected', ''));
   }
+  if ([...select.options].some((option) => option.value === current)) {
+    select.value = current;
+    $('#manualSerialPort').value = '';
+  } else if (saved.port) {
+    $('#manualSerialPort').value = saved.port;
+  }
+  renderRecentPorts(saved.recentPorts);
 }
 
 async function loadSources() {
@@ -329,6 +639,7 @@ function renderSourceResults(result) {
     const checkbox = document.createElement('input');
     checkbox.type = 'checkbox';
     checkbox.value = String(index);
+    checkbox.setAttribute('aria-label', `Select repeater ${memory.name || index + 1}`);
     checkbox.addEventListener('change', updateImportButton);
     selectCell.append(checkbox);
     row.append(selectCell);
@@ -430,6 +741,9 @@ function updateBulkControls() {
     mode: ['showModeColumn', 'mode-column'],
     shift: ['showShiftColumn', 'shift-column'],
     tone: ['showToneColumn', 'tone-column'],
+    power: ['showPowerColumn', 'power-column'],
+    comment: ['showCommentColumn', 'comment-column'],
+    extra: ['showExtraColumn', 'extra-column'],
   };
   Object.entries(columnControls).forEach(([column, [id, selector]]) => {
     $(`#${id}`).checked = state.columns[column];
@@ -457,6 +771,8 @@ function updateBulkControls() {
   $('#clusterSelected').disabled = state.busy || !canArrange;
   $('#copySelected').disabled = state.busy || !canAct;
   $('#cutSelected').disabled = state.busy || !canAct;
+  $('#compareSelectedTab').disabled = state.busy || !canAct ||
+    !$('#compareOpenTab').value;
   $('#pasteSelected').disabled = state.busy || !state.session ||
     !state.clipboardId || $('#pasteChannel').value === '';
   $('#pasteChannel').disabled = state.busy || !state.session ||
@@ -478,6 +794,7 @@ function renderSession() {
     $('#memoryRows').innerHTML = '<tr class="empty-state"><td colspan="9">Your channel list will appear here after you open an image.</td></tr>';
     $('#pageLabel').textContent = '—';
     $('#exportCsv').disabled = true;
+    $('#subdeviceControls').hidden = true;
     $('#loadSettings').disabled = true;
     $('#applySettings').disabled = true;
     renderBanks();
@@ -486,9 +803,19 @@ function renderSession() {
     return;
   }
   details.hidden = false;
-  details.textContent = `${state.session.name} · ${state.session.filename}${state.session.dirty ? ' · Unsaved changes' : ''}`;
-  saveButton.disabled = state.busy;
+  details.textContent = `${state.session.name} · ${state.session.filename}${state.session.is_live ? ' · Live edits apply immediately' : ''}${state.session.dirty ? ' · Unsaved changes' : ''}`;
+  saveButton.disabled = state.busy || state.session.is_live;
   $('#exportCsv').disabled = state.busy;
+  const subdeviceControls = $('#subdeviceControls');
+  const subdevices = state.session.subdevices || [];
+  subdeviceControls.hidden = subdevices.length < 2;
+  if (!subdeviceControls.hidden) {
+    const select = $('#subdeviceSelect');
+    select.replaceChildren(...subdevices.map((device) =>
+      new Option(device.name, String(device.index))));
+    select.value = String(state.session.selected_subdevice || 0);
+    select.disabled = state.busy;
+  }
   $('#uploadButton').disabled = state.busy || !state.session.supports_upload;
   $('#channelTitle').textContent = state.session.name;
   $('#channelCount').textContent = `${state.total.toLocaleString()} channels`;
@@ -507,6 +834,22 @@ function renderSession() {
   updateHistory();
   updateImportButton();
 }
+
+$('#subdeviceSelect').addEventListener('change', async () => {
+  try {
+    setBusy(true);
+    const session = await api(
+      `/api/session/subdevices/${encodeURIComponent($('#subdeviceSelect').value)}`,
+      { method: 'POST' });
+    await refreshSession(session);
+    showNotice(`Switched to ${state.session.name}.`);
+  } catch (error) {
+    showNotice(error.message, true);
+  } finally {
+    setBusy(false);
+    renderSession();
+  }
+});
 
 async function updateHistory() {
   try {
@@ -531,11 +874,18 @@ function txFrequency(memory) {
     (memory.offset || 0) * (memory.duplex === '-' ? -1 : 1);
 }
 
+function extraColumnValue(nodes = []) {
+  return nodes.flatMap((node) => node.type === 'group'
+    ? extraColumnValue(node.children)
+    : [`${node.label}: ${node.value ?? ''}`]).join('; ');
+}
+
 function renderMemories(memories) {
   const rows = $('#memoryRows');
   rows.replaceChildren();
   memories.forEach((memory) => {
     const row = document.createElement('tr');
+    row.dataset.memoryNumber = String(memory.number);
     const selectCell = document.createElement('td');
     const checkbox = document.createElement('input');
     checkbox.type = 'checkbox';
@@ -558,6 +908,9 @@ function renderMemories(memories) {
       [memory.mode || '—', 'mode-column'],
       [memory.duplex ? `${memory.duplex} ${formatFrequency(memory.offset)}` : '—', 'shift-column'],
       [memory.tmode || '—', 'tone-column'],
+      [memory.power_label || '—', 'power-column'],
+      [memory.comment || '—', 'comment-column'],
+      [extraColumnValue(memory.extra), 'extra-column'],
     ];
     values.forEach(([value, className]) => {
       const cell = document.createElement('td');
@@ -573,19 +926,34 @@ function renderMemories(memories) {
     edit.className = 'edit-button';
     edit.type = 'button';
     edit.textContent = 'Edit';
+    edit.setAttribute('aria-label', `Edit channel ${memory.number}`);
     edit.addEventListener('click', () => openEditor(memory));
     actionCell.append(edit);
     row.append(actionCell);
+    row.addEventListener('keydown', (event) => {
+      if (!['ArrowUp', 'ArrowDown'].includes(event.key)) return;
+      event.preventDefault();
+      const rows = [...$('#memoryRows').querySelectorAll('tr[data-memory-number]')];
+      const target = rows[rows.indexOf(row) + (event.key === 'ArrowUp' ? -1 : 1)];
+      target?.querySelector('.edit-button')?.focus();
+    });
     rows.append(row);
   });
   if (!memories.length) {
     rows.innerHTML = '<tr class="empty-state"><td colspan="9">No channels match this view.</td></tr>';
   }
   updateBulkControls();
+  if (state.focusedMemory !== null) {
+    $(`#memoryRows tr[data-memory-number="${state.focusedMemory}"] .edit-button`)?.focus();
+    state.focusedMemory = null;
+  }
 }
 
 async function loadMemories() {
   if (!state.session) return;
+  const activeRow = document.activeElement?.closest?.(
+    '#memoryRows tr[data-memory-number]');
+  if (activeRow) state.focusedMemory = activeRow.dataset.memoryNumber;
   const request = ++state.memoryRequest;
   const params = new URLSearchParams({
     start: String(state.start),
@@ -595,7 +963,20 @@ async function loadMemories() {
     direction: state.direction,
     hide_empty: String(state.hideEmpty),
   });
-  const result = await api(`/api/memories?${params}`);
+  const result = state.filters.length
+    ? await api('/api/memories/query', {
+      method: 'POST',
+      body: JSON.stringify({
+        filters: state.filters,
+        match: state.filterMatch,
+        start: state.start,
+        limit: state.limit,
+        sort: state.sort,
+        direction: state.direction,
+        hide_empty: state.hideEmpty,
+      }),
+    })
+    : await api(`/api/memories?${params}`);
   if (request !== state.memoryRequest) return;
   state.pageMemories = result.memories;
   state.total = result.total;
@@ -606,7 +987,7 @@ async function loadMemories() {
   $('#pageLabel').textContent = result.memories.length
     ? `${first}–${last} ${filtered ? `(${state.start + 1}–${result.end} shown)` : ''} of ${result.total}`
     : `0 of ${result.total}`;
-  $('#channelCount').textContent = state.search
+  $('#channelCount').textContent = (state.search || state.filters.length)
     ? `${result.total.toLocaleString()} matching channels`
     : `${result.total.toLocaleString()} channels`;
   const [low] = state.session.memory_bounds;
@@ -618,8 +999,9 @@ async function loadMemories() {
   updateBulkControls();
 }
 
-async function refreshSession() {
-  state.session = await api('/api/session');
+async function refreshSession(session = null) {
+  state.session = session || await api('/api/session');
+  loadColumnsForSession();
   state.selected.clear();
   state.start = isFilteredView()
     ? 0 : state.session.memory_bounds[0];
@@ -633,6 +1015,7 @@ async function refreshSession() {
   renderSession();
   renderBanks();
   await loadMemories();
+  await refreshTabs();
 }
 
 function readFileAsBase64(file) {
@@ -652,58 +1035,10 @@ function openRecentDatabase() {
       if (!db.objectStoreNames.contains('images')) {
         db.createObjectStore('images', { keyPath: 'id' });
       }
-      if (!db.objectStoreNames.contains('tabs')) {
-        db.createObjectStore('tabs', { keyPath: 'id' });
-      }
     };
     request.onsuccess = () => resolve(request.result);
     request.onerror = () => reject(request.error);
   });
-}
-
-async function readTabs() {
-  const db = await openRecentDatabase();
-  const tabs = await new Promise((resolve, reject) => {
-    const request = db.transaction('tabs').objectStore('tabs').getAll();
-    request.onsuccess = () => resolve(request.result);
-    request.onerror = () => reject(request.error);
-  });
-  db.close();
-  return tabs.sort((a, b) => a.updated - b.updated);
-}
-
-async function saveTabSnapshot(tab) {
-  const updated = Date.now();
-  const snapshot = await api('/api/session/save?preserve_dirty=true', {
-    method: 'POST',
-  });
-  const db = await openRecentDatabase();
-  await new Promise((resolve, reject) => {
-    const transaction = db.transaction('tabs', 'readwrite');
-    transaction.objectStore('tabs').put({
-      ...tab,
-      filename: snapshot.filename,
-      data_base64: snapshot.data_base64,
-      updated,
-    });
-    transaction.oncomplete = resolve;
-    transaction.onerror = () => reject(transaction.error);
-  });
-  db.close();
-  Object.assign(tab, snapshot);
-  tab.updated = updated;
-}
-
-async function touchTab(tab) {
-  tab.updated = Date.now();
-  const db = await openRecentDatabase();
-  await new Promise((resolve, reject) => {
-    const transaction = db.transaction('tabs', 'readwrite');
-    transaction.objectStore('tabs').put(tab);
-    transaction.oncomplete = resolve;
-    transaction.onerror = () => reject(transaction.error);
-  });
-  db.close();
 }
 
 function renderTabs() {
@@ -713,12 +1048,40 @@ function renderTabs() {
     const button = document.createElement('button');
     button.type = 'button';
     button.className = 'image-tab';
-    button.setAttribute('aria-current',
-      tab.id === state.activeTabId ? 'page' : 'false');
-    button.textContent = `${tab.filename}${state.session?.dirty &&
-      tab.id === state.activeTabId ? ' •' : ''}`;
+    button.setAttribute('aria-current', tab.id === state.activeTabId
+      ? 'page' : 'false');
+    button.draggable = true;
+    button.textContent = `${tab.name || tab.filename}${tab.dirty ? ' •' : ''}`;
     button.title = 'Switch to image tab';
     button.addEventListener('click', () => switchTab(tab.id));
+    button.addEventListener('keydown', (event) => {
+      const tabs = [...container.querySelectorAll('.image-tab')];
+      const index = tabs.indexOf(button);
+      if (event.key === 'Home') {
+        event.preventDefault();
+        tabs[0]?.focus();
+      } else if (event.key === 'End') {
+        event.preventDefault();
+        tabs.at(-1)?.focus();
+      } else if (['ArrowLeft', 'ArrowRight'].includes(event.key)) {
+        event.preventDefault();
+        tabs[(index + (event.key === 'ArrowLeft' ? -1 : 1) + tabs.length) %
+          tabs.length]?.focus();
+      }
+    });
+    button.addEventListener('dragstart', (event) => {
+      event.dataTransfer.setData('text/plain', tab.id);
+      event.dataTransfer.effectAllowed = 'move';
+    });
+    button.addEventListener('dragover', (event) => event.preventDefault());
+    button.addEventListener('drop', async (event) => {
+      event.preventDefault();
+      const source = event.dataTransfer.getData('text/plain');
+      if (!source || source === tab.id) return;
+      try {
+        await reorderTab(source, tab.id);
+      } catch (error) { showNotice(error.message, true); }
+    });
     container.append(button);
     const close = document.createElement('button');
     close.type = 'button';
@@ -731,37 +1094,78 @@ function renderTabs() {
       closeTab(tab.id);
     });
     container.append(close);
+    const detach = document.createElement('button');
+    detach.type = 'button';
+    detach.className = 'image-tab-close';
+    detach.disabled = state.busy;
+    detach.textContent = '↗';
+    detach.setAttribute('aria-label', `Open ${tab.filename} in a new window`);
+    detach.addEventListener('click', () => {
+      const url = new URL(window.location.href);
+      url.searchParams.set('tab', tab.id);
+      window.open(url, '_blank', 'noopener');
+    });
+    container.append(detach);
+    for (const [direction, label] of [['previous', 'Move left'], ['next', 'Move right']]) {
+      const move = document.createElement('button');
+      move.type = 'button';
+      move.className = 'image-tab-close';
+      move.disabled = state.busy ||
+        (direction === 'previous' ? state.tabs[0] === tab : state.tabs.at(-1) === tab);
+      move.textContent = direction === 'previous' ? '←' : '→';
+      move.setAttribute('aria-label', `${label}: ${tab.filename}`);
+      move.addEventListener('click', async () => {
+        const index = state.tabs.indexOf(tab);
+        const target = state.tabs[index + (direction === 'previous' ? -1 : 1)];
+        try {
+          await reorderTab(tab.id, target.id);
+          $(`#imageTabs .image-tab[aria-current="page"]`)?.focus();
+        } catch (error) { showNotice(error.message, true); }
+      });
+      container.append(move);
+    }
   });
+  const compare = $('#compareOpenTab');
+  const selected = compare.value;
+  compare.replaceChildren(new Option('Choose another open image…', ''));
+  state.tabs.filter((tab) => tab.id !== state.activeTabId && tab.filename)
+    .forEach((tab) => compare.add(new Option(tab.filename, tab.id)));
+  compare.value = [...compare.options].some((option) => option.value === selected)
+    ? selected : '';
+  compare.disabled = state.busy || compare.options.length < 2;
+  updateBulkControls();
 }
 
-async function addCurrentTab(filename) {
-  const tab = { id: crypto.randomUUID(), filename, updated: Date.now() };
-  state.tabs.push(tab);
-  state.activeTabId = tab.id;
-  await saveTabSnapshot(tab);
+async function reorderTab(sourceId, beforeId) {
+  const order = state.tabs.map((item) => item.id);
+  order.splice(order.indexOf(sourceId), 1);
+  order.splice(order.indexOf(beforeId), 0, sourceId);
+  await api('/api/session/tabs', {
+    method: 'PUT', body: JSON.stringify({ tab_ids: order }),
+  });
+  await refreshTabs();
+  showNotice('Image tab reordered.');
+}
+
+async function refreshTabs() {
+  const result = await api('/api/session/tabs');
+  state.tabs = result.tabs;
+  state.activeTabId = result.active_tab_id;
   renderTabs();
 }
 
 async function switchTab(id) {
   const target = state.tabs.find((tab) => tab.id === id);
   if (!target || id === state.activeTabId || state.busy) return;
-  const current = state.tabs.find((tab) => tab.id === state.activeTabId);
   try {
     setBusy(true);
-    if (current && state.session) await saveTabSnapshot(current);
-    await api('/api/session/open', {
+    const session = await api(`/api/session/tabs/${encodeURIComponent(id)}/activate`, {
       method: 'POST',
-      body: JSON.stringify({
-        filename: target.filename,
-        data_base64: target.data_base64,
-        confirm_replace: true,
-      }),
     });
-    await touchTab(target);
     state.activeTabId = id;
-    await refreshSession();
-    renderTabs();
-    showNotice(`Switched to ${target.filename}.`);
+    await refreshSession(session);
+    $(`#imageTabs .image-tab[aria-current="page"]`)?.focus();
+    showNotice(`Switched to ${target.name || target.filename}.`);
   } catch (error) {
     showNotice(error.message, true);
   } finally {
@@ -774,32 +1178,60 @@ async function closeTab(id) {
   const tab = state.tabs.find((item) => item.id === id);
   if (!tab || state.busy) return;
   try {
-    if (id === state.activeTabId && state.session?.dirty &&
+    if (tab.dirty &&
         !window.confirm(`Close ${tab.filename} and discard its unsaved changes?`)) {
       return;
     }
-    const db = await openRecentDatabase();
-    await new Promise((resolve, reject) => {
-      const transaction = db.transaction('tabs', 'readwrite');
-      transaction.objectStore('tabs').delete(id);
-      transaction.oncomplete = resolve;
-      transaction.onerror = () => reject(transaction.error);
-    });
-    db.close();
-    state.tabs = state.tabs.filter((item) => item.id !== id);
-    if (id === state.activeTabId) {
-      state.activeTabId = null;
-      if (state.tabs.length) {
-        await switchTab(state.tabs.at(-1).id);
-      } else {
-        await api('/api/session/close', { method: 'POST' });
-        state.session = null;
-        renderSession();
-      }
+
+    if (id !== state.activeTabId) await switchTab(id);
+    if (state.activeTabId !== id) return;
+    setBusy(true);
+    await api('/api/session/close', { method: 'POST' });
+    await refreshTabs();
+    if (state.activeTabId) await refreshSession();
+    else {
+      state.session = null;
+      renderSession();
     }
-    renderTabs();
   } catch (error) { showNotice(error.message, true); }
+  finally {
+    setBusy(false);
+    renderSession();
+  }
 }
+
+$('#compareOpenTab').addEventListener('change', updateBulkControls);
+$('#closeTabCompare').addEventListener('click', () => $('#tabCompareDialog').close());
+$('#compareSelectedTab').addEventListener('click', async () => {
+  const numbers = [...state.selected];
+  const tabId = $('#compareOpenTab').value;
+  if (!numbers.length || !tabId) return;
+  try {
+    const result = await api('/api/session/compare-tab', {
+      method: 'POST', body: JSON.stringify({ tab_id: tabId, numbers }),
+    });
+    const container = $('#tabCompareResults');
+    container.replaceChildren();
+    result.comparisons.forEach((comparison) => {
+      const item = document.createElement('article');
+      item.className = 'comparison-item';
+      const heading = document.createElement('strong');
+      heading.textContent = `Channel ${comparison.number}`;
+      item.append(heading);
+      if (comparison.equal) {
+        item.append(document.createTextNode(' — identical'));
+      } else {
+        Object.entries(comparison.changes).forEach(([field, value]) => {
+          const line = document.createElement('p');
+          line.textContent = `${field}: ${value.current ?? '—'} → ${value.other ?? '—'}`;
+          item.append(line);
+        });
+      }
+      container.append(item);
+    });
+    $('#tabCompareDialog').showModal();
+  } catch (error) { showNotice(error.message, true); }
+});
 
 async function saveRecentImage(file) {
   const db = await openRecentDatabase();
@@ -870,17 +1302,15 @@ async function loadConfigurations() {
 $('#newConfiguration').addEventListener('click', async () => {
   try {
     setBusy(true);
-    const currentTab = state.tabs.find((tab) => tab.id === state.activeTabId);
-    if (currentTab && state.session) await saveTabSnapshot(currentTab);
-    await api('/api/session/new', {
+    const result = await api('/api/session/new', {
       method: 'POST',
       body: JSON.stringify({
         template_id: $('#configurationTemplate').value,
         confirm_replace: Boolean(state.session),
       }),
     });
+    state.activeTabId = result.tab_id;
     await refreshSession();
-    await addCurrentTab(state.session.filename);
     showNotice(`Created ${state.session.filename}.`);
   } catch (error) {
     showNotice(error.message, true);
@@ -890,35 +1320,32 @@ $('#newConfiguration').addEventListener('click', async () => {
   }
 });
 
-$('#imageFile').addEventListener('change', async (event) => {
-  const file = event.target.files[0];
-  event.target.value = '';
-  if (!file) return;
-  if (file.size > 20 * 1024 * 1024) {
-    showNotice('Choose an image smaller than 20 MB.', true);
-    return;
+function validateImageFile(file, message = t('imageTooLarge')) {
+  if (!file || !IMAGE_EXTENSIONS.test(file.name)) {
+    throw new Error(t('invalidImageFile'));
   }
+  if (file.size > 20 * 1024 * 1024) throw new Error(message);
+}
+
+async function openImageFile(file) {
   try {
+    validateImageFile(file);
     setBusy(true);
-    showNotice('Opening radio image…');
-    const currentTab = state.tabs.find((tab) => tab.id === state.activeTabId);
-    if (currentTab && state.session) await saveTabSnapshot(currentTab);
-    await api('/api/session/open', {
+    showNotice(t('droppedOpen'));
+    const result = await api('/api/session/open', {
       method: 'POST',
       body: JSON.stringify({
-        filename: file.name,
-        data_base64: await readFileAsBase64(file),
+        filename: file.name, data_base64: await readFileAsBase64(file),
         confirm_replace: Boolean(state.session),
       }),
     });
+    state.activeTabId = result.tab_id;
     try {
       await saveRecentImage(file);
     } catch (error) {
       showNotice(`Image opened, but the browser could not save it to recents: ${error.message}`, true);
     }
     await refreshSession();
-    await addCurrentTab(file.name);
-    renderSession();
     showNotice('Radio image opened. Your edits remain on this computer.');
   } catch (error) {
     showNotice(error.message, true);
@@ -926,15 +1353,20 @@ $('#imageFile').addEventListener('change', async (event) => {
     setBusy(false);
     renderSession();
   }
+}
+
+$('#imageFile').addEventListener('change', async (event) => {
+  const file = event.target.files[0];
+  event.target.value = '';
+  if (!file) return;
+  await openImageFile(file);
 });
 
 $('#openRecent').addEventListener('click', async () => {
   try {
     const file = await getRecentImage($('#recentImages').value);
     setBusy(true);
-    const currentTab = state.tabs.find((tab) => tab.id === state.activeTabId);
-    if (currentTab && state.session) await saveTabSnapshot(currentTab);
-    await api('/api/session/open', {
+    const result = await api('/api/session/open', {
       method: 'POST',
       body: JSON.stringify({
         filename: file.name,
@@ -942,8 +1374,8 @@ $('#openRecent').addEventListener('click', async () => {
         confirm_replace: Boolean(state.session),
       }),
     });
+    state.activeTabId = result.tab_id;
     await refreshSession();
-    await addCurrentTab(file.name);
     showNotice('Recent image reopened.');
   } catch (error) {
     showNotice(error.message, true);
@@ -957,15 +1389,9 @@ $('#recentImages').addEventListener('change', () => {
   $('#openRecent').disabled = !$('#recentImages').value || state.busy;
 });
 
-$('#compareFile').addEventListener('change', async (event) => {
-  const file = event.target.files[0];
-  event.target.value = '';
-  if (!file) return;
-  if (file.size > 20 * 1024 * 1024) {
-    showNotice('Choose an image smaller than 20 MB.', true);
-    return;
-  }
+async function compareImageFile(file) {
   try {
+    validateImageFile(file);
     setBusy(true);
     const result = await api('/api/session/compare', {
       method: 'POST',
@@ -983,6 +1409,7 @@ $('#compareFile').addEventListener('change', async (event) => {
       const checkbox = document.createElement('input');
       checkbox.type = 'checkbox';
       checkbox.value = String(memory.number);
+      checkbox.setAttribute('aria-label', `Select channel ${memory.number} to copy`);
       checkbox.addEventListener('change', updateCopyCompared);
       select.append(checkbox);
       row.append(select);
@@ -1004,6 +1431,13 @@ $('#compareFile').addEventListener('change', async (event) => {
   } finally {
     setBusy(false);
   }
+}
+
+$('#compareFile').addEventListener('change', async (event) => {
+  const file = event.target.files[0];
+  event.target.value = '';
+  if (!file) return;
+  await compareImageFile(file);
 });
 
 function updateCopyCompared() {
@@ -1038,25 +1472,32 @@ $('#copyCompared').addEventListener('click', async () => {
   }
 });
 
-$('#importFile').addEventListener('change', async (event) => {
-  const file = event.target.files[0];
-  event.target.value = '';
-  if (!file) return;
-  if (file.size > 20 * 1024 * 1024) {
-    showNotice('Choose a channel file smaller than 20 MB.', true);
-    return;
-  }
-  if (!state.session) {
-    showNotice('Open a destination image before merging channels.', true);
-    return;
-  }
+function updateImportPlacement() {
+  const range = $('#importPlacement').value === 'range';
+  $('#importDestinationLabel').hidden = !range;
+  $('#importDestination').hidden = !range;
+  $('#importDestination').disabled = state.busy || !range;
+}
+
+$('#importPlacement').addEventListener('change', updateImportPlacement);
+
+async function importChannelsFile(file) {
   try {
+    validateImageFile(file, t('importTooLarge'));
+    if (!state.session) throw new Error(t('openDestinationFirst'));
+    const placement = $('#importPlacement').value;
+    const destination = Number.parseInt($('#importDestination').value, 10);
+    if (placement === 'range' && !Number.isInteger(destination)) {
+      throw new Error('Enter the first destination channel for range import.');
+    }
     setBusy(true);
     const result = await api('/api/session/import', {
       method: 'POST',
       body: JSON.stringify({
         filename: file.name,
         data_base64: await readFileAsBase64(file),
+        placement,
+        ...(placement === 'range' ? { destination_start: destination } : {}),
       }),
     });
     state.selected.clear();
@@ -1067,29 +1508,69 @@ $('#importFile').addEventListener('change', async (event) => {
     const warnings = result.warnings.length
       ? ` Driver warnings: ${result.warnings.join('; ')}`
       : '';
-    showNotice(`${result.imported} of ${result.source_count} channel${result.source_count === 1 ? '' : 's'} merged into empty slots.${rejected}${warnings}`);
+    const placementText = {
+      empty: 'merged into empty slots',
+      matching: 'written to matching channel numbers',
+      append: 'appended after the last used channel',
+      range: 'written to the destination range',
+    }[placement];
+    showNotice(`${result.imported} of ${result.source_count} channel${result.source_count === 1 ? '' : 's'} ${placementText}.${rejected}${warnings}`);
   } catch (error) {
     showNotice(error.message, true);
   } finally {
     setBusy(false);
     renderSession();
   }
+}
+
+$('#importFile').addEventListener('change', async (event) => {
+  const file = event.target.files[0];
+  event.target.value = '';
+  if (!file) return;
+  await importChannelsFile(file);
 });
+
+function outputScopePayload() {
+  let scope = $('#outputScope').value;
+  if (scope === 'auto') {
+    scope = state.selected.size ? 'selected' :
+      isFilteredView() ? 'filtered' : 'all';
+  }
+  if (scope === 'selected' && !state.selected.size) {
+    throw new Error('Select one or more channels, or choose another print/export scope.');
+  }
+  return {
+    scope,
+    numbers: [...state.selected],
+    filters: state.filters,
+    match: state.filterMatch,
+    search: state.search,
+    sort: state.sort,
+    direction: state.direction,
+    hide_empty: state.hideEmpty,
+  };
+}
+
+async function scopedDownload(path, payload, filename) {
+  const response = await fetch(path, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      ...(state.activeTabId ? { 'X-Chirp-Tab': state.activeTabId } : {}),
+    },
+    body: JSON.stringify(payload),
+  });
+  if (!response.ok) {
+    const body = await response.json().catch(() => ({}));
+    throw new Error(body.detail || response.statusText);
+  }
+  downloadBlob(filename, await response.blob());
+}
 
 $('#exportCsv').addEventListener('click', async () => {
   try {
-    const response = await fetch('/api/session/export.csv');
-    if (!response.ok) {
-      const body = await response.json().catch(() => ({}));
-      throw new Error(body.detail || response.statusText);
-    }
-    const blob = await response.blob();
-    const url = URL.createObjectURL(blob);
-    const link = document.createElement('a');
-    link.href = url;
-    link.download = 'channels.csv';
-    link.click();
-    URL.revokeObjectURL(url);
+    await scopedDownload(
+      '/api/session/export.csv', outputScopePayload(), 'channels.csv');
     showNotice('Channel list exported as CSV.');
   } catch (error) {
     showNotice(error.message, true);
@@ -1110,11 +1591,236 @@ function downloadData(filename, dataBase64) {
   URL.revokeObjectURL(url);
 }
 
+function downloadBlob(filename, blob) {
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement('a');
+  link.href = url;
+  link.download = filename;
+  link.click();
+  URL.revokeObjectURL(url);
+}
+
+async function downloadResponse(path, filename) {
+  const response = await fetch(path, {
+    headers: state.activeTabId ? { 'X-Chirp-Tab': state.activeTabId } : {},
+  });
+  if (!response.ok) {
+    const body = await response.json().catch(() => ({}));
+    throw new Error(body.detail || response.statusText);
+  }
+  downloadBlob(filename, await response.blob());
+}
+
+$('#showRadioInfo').addEventListener('click', async () => {
+  try {
+    const info = await api('/api/session/info');
+    $('#radioInfoContent').textContent = JSON.stringify(info, null, 2);
+    $('#radioInfoDialog').showModal();
+  } catch (error) { showNotice(error.message, true); }
+});
+$('#closeRadioInfo').addEventListener('click', () => $('#radioInfoDialog').close());
+$('#downloadDiagnostics').addEventListener('click', async () => {
+  try {
+    await downloadResponse('/api/session/diagnostics', 'chirp-web-diagnostics.zip');
+    showNotice('Diagnostics downloaded. It contains no image or channel data.');
+  } catch (error) { showNotice(error.message, true); }
+});
+$('#downloadBackup').addEventListener('click', async () => {
+  try {
+    const { backups } = await api('/api/session/backups');
+    const backup = backups.at(-1);
+    if (!backup) throw new Error('No transfer backup is available for this tab.');
+    await downloadResponse(
+      `/api/session/backups/${encodeURIComponent(backup.id)}`,
+      backup.filename || 'chirp-web-backup.img');
+  } catch (error) { showNotice(error.message, true); }
+});
+
+async function renderBackupManager() {
+  const [settings, result] = await Promise.all([
+    api('/api/session/backups/settings'),
+    api('/api/session/backups'),
+  ]);
+  $('#backupDirectory').value = settings.directory || '';
+  $('#backupRetention').value = String(settings.retention);
+  const list = $('#backupList');
+  list.replaceChildren();
+  if (!result.backups.length) {
+    list.textContent = 'No backups are available for this session.';
+    return;
+  }
+  result.backups.slice().reverse().forEach((backup) => {
+    const item = document.createElement('article');
+    item.className = 'backup-item';
+    const detail = document.createElement('span');
+    const time = new Date(backup.created_at * 1000).toLocaleString();
+    detail.textContent = `${backup.filename} · ${time} · ${
+      backup.persistent ? 'retained' : 'temporary'}`;
+    const download = document.createElement('button');
+    download.className = 'button button-quiet';
+    download.type = 'button';
+    download.textContent = 'Download';
+    download.addEventListener('click', () => downloadResponse(
+      `/api/session/backups/${encodeURIComponent(backup.id)}`,
+      backup.filename));
+    item.append(detail, download);
+    if (backup.persistent) {
+      const restore = document.createElement('button');
+      restore.className = 'button button-quiet';
+      restore.type = 'button';
+      restore.textContent = 'Restore as new tab';
+      restore.addEventListener('click', async () => {
+        try {
+          const opened = await api(
+            `/api/session/backups/${encodeURIComponent(backup.id)}/restore`,
+            { method: 'POST' });
+          state.activeTabId = opened.tab_id;
+          await refreshSession(opened);
+          await renderBackupManager();
+          showNotice('Backup restored in a new tab.');
+        } catch (error) { showNotice(error.message, true); }
+      });
+      const remove = document.createElement('button');
+      remove.className = 'button button-quiet';
+      remove.type = 'button';
+      remove.textContent = 'Delete';
+      remove.addEventListener('click', async () => {
+        if (!window.confirm(`Delete retained backup ${backup.filename}?`)) return;
+        try {
+          await api(`/api/session/backups/${encodeURIComponent(backup.id)}`, {
+            method: 'DELETE',
+          });
+          await renderBackupManager();
+          showNotice('Retained backup deleted.');
+        } catch (error) { showNotice(error.message, true); }
+      });
+      item.append(restore, remove);
+    }
+    list.append(item);
+  });
+}
+
+$('#manageBackups').addEventListener('click', async () => {
+  try {
+    await renderBackupManager();
+    $('#backupDialog').showModal();
+  } catch (error) { showNotice(error.message, true); }
+});
+$('#closeBackups').addEventListener('click', () => $('#backupDialog').close());
+$('#saveBackupSettings').addEventListener('click', async () => {
+  const directory = $('#backupDirectory').value.trim();
+  const retention = Number.parseInt($('#backupRetention').value, 10);
+  if (!directory || !Number.isInteger(retention) || retention < 1 ||
+      retention > 100) {
+    showNotice('Enter an existing backup directory and a retention from 1 to 100.', true);
+    return;
+  }
+  try {
+    await api('/api/session/backups/settings', {
+      method: 'PUT', body: JSON.stringify({ directory, retention }),
+    });
+    await renderBackupManager();
+    showNotice('Retained backup storage configured.');
+  } catch (error) { showNotice(error.message, true); }
+});
+$('#disableBackupStorage').addEventListener('click', async () => {
+  try {
+    await api('/api/session/backups/settings', {
+      method: 'PUT', body: JSON.stringify({ directory: null, retention: 10 }),
+    });
+    await renderBackupManager();
+    showNotice('New backups will be temporary only.');
+  } catch (error) { showNotice(error.message, true); }
+});
+
+$('#supportReport').addEventListener('click', async () => {
+  try {
+    const manifest = await api('/api/session/report-manifest');
+    const files = $('#supportReportFiles');
+    files.replaceChildren();
+    manifest.files.forEach((file) => {
+      const label = document.createElement('label');
+      const checkbox = document.createElement('input');
+      checkbox.type = 'checkbox';
+      checkbox.name = 'report-file';
+      checkbox.value = file.id;
+      checkbox.checked = Boolean(file.default);
+      const name = document.createElement('strong');
+      name.textContent = file.name;
+      const description = document.createElement('small');
+      description.textContent = file.description;
+      label.append(checkbox, name, description);
+      files.append(label);
+    });
+    $('#supportReportDialog').showModal();
+  } catch (error) { showNotice(error.message, true); }
+});
+['closeSupportReport', 'cancelSupportReport'].forEach((id) => {
+  $(`#${id}`).addEventListener('click', () => $('#supportReportDialog').close());
+});
+$('#supportReportForm').addEventListener('submit', async (event) => {
+  event.preventDefault();
+  try {
+    const include = [...$('#supportReportFiles').querySelectorAll(':checked')]
+      .map((checkbox) => checkbox.value);
+    const response = await fetch('/api/session/report', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        ...(state.activeTabId ? { 'X-Chirp-Tab': state.activeTabId } : {}),
+      },
+      body: JSON.stringify({ include }),
+    });
+    if (!response.ok) {
+      const body = await response.json().catch(() => ({}));
+      throw new Error(body.detail || response.statusText);
+    }
+    downloadBlob('chirp-web-support-report.zip', await response.blob());
+    $('#supportReportDialog').close();
+    showNotice(t('reportReady'));
+  } catch (error) { showNotice(error.message, true); }
+});
+
+$('#exportRecovery').addEventListener('click', async () => {
+  try {
+    const recovery = await api('/api/session/recovery/export', { method: 'POST' });
+    const data = JSON.stringify(recovery, null, 2);
+    downloadBlob('chirp-web-recovery.json',
+      new Blob([data], { type: 'application/json' }));
+    showNotice(t('recoveryExported'));
+  } catch (error) { showNotice(error.message, true); }
+});
+$('#restoreRecovery').addEventListener('change', async (event) => {
+  const file = event.target.files[0];
+  event.target.value = '';
+  if (!file) return;
+  try {
+    const recovery = JSON.parse(await file.text());
+    if (!Array.isArray(recovery.tabs)) {
+      throw new Error('This is not a valid CHIRP Web recovery file.');
+    }
+    if (!window.confirm('Restore this recovery file? Current open tabs may be replaced.')) {
+      return;
+    }
+    setBusy(true);
+    const result = await api('/api/session/recovery/import', {
+      method: 'POST', body: JSON.stringify({ tabs: recovery.tabs }),
+    });
+    state.activeTabId = result.active_tab_id || null;
+    await refreshTabs();
+    if (state.activeTabId) await refreshSession();
+    else { state.session = null; renderSession(); }
+    showNotice(t('recoveryRestored'));
+  } catch (error) { showNotice(error.message, true); }
+  finally { setBusy(false); renderSession(); }
+});
+
 $('#saveButton').addEventListener('click', async () => {
   try {
     const result = await api('/api/session/save', { method: 'POST' });
     downloadData(result.filename, result.data_base64);
     state.session.dirty = false;
+    await refreshTabs();
     renderSession();
     showNotice('Image saved to your computer.');
   } catch (error) {
@@ -1125,43 +1831,74 @@ $('#saveButton').addEventListener('click', async () => {
 function showProgress(job) {
   $('#transferProgress').hidden = false;
   $('#progressBar').style.width = `${job.progress}%`;
+  $('#progressBar').setAttribute('aria-valuenow', String(job.progress));
   $('#progressMessage').textContent = job.message;
   $('#progressPercent').textContent = `${job.progress}%`;
 }
 
 async function watchTransfer(job) {
+  state.transferJob = job.id;
+  $('#cancelTransfer').hidden = false;
   showProgress(job);
-  while (job.state === 'running') {
+  while (['running', 'cancelling'].includes(job.state)) {
     await new Promise((resolve) => setTimeout(resolve, 650));
     job = await api(`/api/transfers/${job.id}`);
     showProgress(job);
   }
+  state.transferJob = null;
+  $('#cancelTransfer').hidden = true;
+  if (job.state === 'cancelled') throw new Error('Transfer cancelled.');
   if (job.state === 'failed') throw new Error(job.error || 'Radio transfer failed.');
   await refreshSession();
   return job;
 }
 
+async function confirmTransferPrompts(operation) {
+  const prompts = operation === 'upload'
+    ? await api('/api/transfers/prompts/upload')
+    : (await api(`/api/radios/${encodeURIComponent($('#radioModel').value)}/prompts`)).download || {};
+  const messages = Object.values(prompts).filter(Boolean);
+  return !messages.length || window.confirm(
+    `Review these ${operation} instructions before continuing:\n\n${messages.join('\n\n')}`);
+}
+
+$('#cancelTransfer').addEventListener('click', async () => {
+  if (!state.transferJob) return;
+  try {
+    $('#cancelTransfer').disabled = true;
+    await api(`/api/transfers/${encodeURIComponent(state.transferJob)}`, {
+      method: 'DELETE',
+    });
+    showNotice('Cancelling transfer…');
+  } catch (error) {
+    showNotice(error.message, true);
+  }
+});
+
 $('#downloadButton').addEventListener('click', async () => {
-  if (!$('#radioModel').value || !$('#serialPort').value) {
+  if (!$('#radioModel').value || !selectedPort()) {
     showNotice('Select a radio model and serial port first.', true);
     return;
   }
   const confirmReplace = Boolean(state.session?.dirty);
   if (confirmReplace && !window.confirm(
-      'Reading from the radio will replace your unsaved image changes. Continue?')) {
+      'Reading from the radio will open a new tab. Keep this unsaved image open too?')) {
     return;
   }
   try {
+    if (!await confirmTransferPrompts('download')) return;
     setBusy(true);
     $('#transferProgress').hidden = false;
     const job = await api('/api/transfers/download', {
       method: 'POST',
       body: JSON.stringify({
         radio_id: $('#radioModel').value,
-        port: $('#serialPort').value,
+        port: selectedPort(),
         confirm_replace: confirmReplace,
+        confirm_prompts: true,
       }),
     });
+    state.activeTabId = job.tab_id;
     await watchTransfer(job);
     showNotice('Radio read complete. Review the channel list and save the image.');
   } catch (error) {
@@ -1173,7 +1910,7 @@ $('#downloadButton').addEventListener('click', async () => {
 });
 
 $('#uploadButton').addEventListener('click', async () => {
-  if (!state.session || !$('#serialPort').value) {
+  if (!state.session || !selectedPort()) {
     showNotice('Open a radio image and select a serial port first.', true);
     return;
   }
@@ -1185,11 +1922,14 @@ $('#uploadButton').addEventListener('click', async () => {
     return;
   }
   try {
+    if (!await confirmTransferPrompts('upload')) return;
     setBusy(true);
     $('#transferProgress').hidden = false;
     const job = await api('/api/transfers/upload', {
       method: 'POST',
-      body: JSON.stringify({ port: $('#serialPort').value, confirm: true }),
+      body: JSON.stringify({
+        port: selectedPort(), confirm: true, confirm_prompts: true,
+      }),
     });
     await watchTransfer(job);
     showNotice('Radio write complete.');
@@ -1298,29 +2038,43 @@ $('#redoChange').addEventListener('click', async () => {
 $('#printChannels').addEventListener('click', async () => {
   if (!state.session) return;
   try {
-    const [low, high] = state.session.memory_bounds;
-    const memories = [];
-    for (let start = low; start <= high; start += 200) {
-      const result = await api(`/api/memories?start=${start}&limit=200`);
-      memories.push(...result.memories.filter((memory) => !memory.empty));
-    }
+    const result = await api('/api/session/print', {
+      method: 'POST', body: JSON.stringify(outputScopePayload()),
+    });
+    const memories = result.memories;
     const content = $('#printContent');
     content.replaceChildren();
     const heading = document.createElement('h1');
     heading.textContent = `${state.session.name} — ${state.session.filename}`;
     content.append(heading);
     const table = document.createElement('table');
-    table.innerHTML = '<thead><tr><th>CH</th><th>NAME</th><th>FREQUENCY</th><th>MODE</th><th>DUPLEX</th><th>TONE</th><th>COMMENT</th></tr></thead>';
+    const columns = [
+      ['CH', (memory) => memory.number],
+      ...(state.columns.name ? [['NAME', (memory) => memory.name]] : []),
+      ...(state.columns.frequency ? [['FREQUENCY', (memory) => formatFrequency(memory.freq)]] : []),
+      ...(state.columns.mode ? [['MODE', (memory) => memory.mode]] : []),
+      ...(state.columns.shift ? [['DUPLEX', (memory) => memory.duplex
+        ? `${memory.duplex} ${formatFrequency(memory.offset)}` : '']] : []),
+      ...(state.columns.tone ? [['TONE', (memory) => memory.tmode]] : []),
+      ...(state.columns.power ? [['POWER', (memory) => memory.power_label]] : []),
+      ...(state.columns.comment ? [['COMMENT', (memory) => memory.comment]] : []),
+      ...(state.columns.extra ? [['DRIVER FIELDS', (memory) => extraColumnValue(memory.extra)]] : []),
+    ];
+    const head = document.createElement('thead');
+    const header = document.createElement('tr');
+    columns.forEach(([label]) => {
+      const cell = document.createElement('th');
+      cell.textContent = label;
+      header.append(cell);
+    });
+    head.append(header);
+    table.append(head);
     const body = document.createElement('tbody');
     memories.forEach((memory) => {
       const row = document.createElement('tr');
-      [
-        memory.number, memory.name, formatFrequency(memory.freq), memory.mode,
-        memory.duplex ? `${memory.duplex} ${formatFrequency(memory.offset)}` : '',
-        memory.tmode, memory.comment,
-      ].forEach((value) => {
+      columns.forEach(([, render]) => {
         const cell = document.createElement('td');
-        cell.textContent = value ?? '';
+        cell.textContent = render(memory) ?? '';
         row.append(cell);
       });
       body.append(row);
@@ -1340,7 +2094,60 @@ $('#refreshPorts').addEventListener('click', async () => {
   }
 });
 
+$('#scanUsb').addEventListener('click', async () => {
+  try {
+    $('#portScanStatus').textContent = t('scanningUsb');
+    const baseline = await api('/api/ports/baseline');
+    const baselinePorts = (Array.isArray(baseline) ? baseline :
+      baseline.baseline || portsFromResponse(baseline)).map((port) =>
+      typeof port === 'string' ? port : port.port);
+    const query = new URLSearchParams({ baseline: JSON.stringify(baselinePorts) });
+    const detected = await api(`/api/ports/detect?${query}`);
+    renderPorts(detected);
+    $('#portScanStatus').textContent = t('scanComplete');
+    showNotice(t('scanComplete'));
+  } catch (error) {
+    $('#portScanStatus').textContent = error.message;
+    showNotice(error.message, true);
+  }
+});
+
+$('#radioModel').addEventListener('change', saveConnectionPreferences);
+$('#serialPort').addEventListener('change', () => {
+  $('#manualSerialPort').value = '';
+  saveConnectionPreferences();
+});
+$('#manualSerialPort').addEventListener('change', saveConnectionPreferences);
+
 $('#sourceName').addEventListener('change', updateSourceExample);
+function setSourceQueryRunning(running) {
+  $('#querySource').disabled = running || state.busy;
+  $('#cancelSourceQuery').hidden = !running;
+}
+
+async function watchSourceQuery(job) {
+  state.sourceJob = job.id;
+  setSourceQueryRunning(true);
+  job = await api(`/api/sources/jobs/${encodeURIComponent(job.id)}`);
+  while (state.sourceJob === job.id && ['queued', 'running', 'pending'].includes(job.state)) {
+    const progress = Number.isFinite(job.progress) ? ` (${job.progress}%)` : '';
+    $('#sourceStatus').textContent = `${job.message || t('sourceSearching')}${progress}`;
+    await new Promise((resolve) => setTimeout(resolve, 650));
+    job = await api(`/api/sources/jobs/${encodeURIComponent(job.id)}`);
+  }
+  if (state.sourceJob !== job.id) return null;
+  state.sourceJob = null;
+  setSourceQueryRunning(false);
+  if (job.state === 'cancelled') {
+    $('#sourceStatus').textContent = t('sourceCancelled');
+    return null;
+  }
+  if (job.state === 'failed' || job.error) {
+    throw new Error(job.error || job.message || 'Source search failed.');
+  }
+  return job.result;
+}
+
 $('#querySource').addEventListener('click', async () => {
   let params;
   try {
@@ -1351,12 +2158,13 @@ $('#querySource').addEventListener('click', async () => {
     return;
   }
   try {
-    setBusy(true);
-    $('#sourceStatus').textContent = 'Searching the network source…';
-    const result = await api(`/api/sources/${encodeURIComponent($('#sourceName').value)}/query`, {
+    $('#sourceStatus').textContent = t('sourceSearching');
+    const job = await api(`/api/sources/${encodeURIComponent($('#sourceName').value)}/query`, {
       method: 'POST',
       body: JSON.stringify({ params }),
     });
+    const result = await watchSourceQuery(job);
+    if (!result) return;
     state.sourceResults = result;
     renderSourceResults(result);
     showNotice(`${result.count.toLocaleString()} repeaters found.`);
@@ -1364,9 +2172,20 @@ $('#querySource').addEventListener('click', async () => {
     $('#sourceStatus').textContent = error.message;
     showNotice(error.message, true);
   } finally {
-    setBusy(false);
+    setSourceQueryRunning(false);
     updateImportButton();
   }
+});
+
+$('#cancelSourceQuery').addEventListener('click', async () => {
+  if (!state.sourceJob) return;
+  const jobId = state.sourceJob;
+  try {
+    await api(`/api/sources/jobs/${encodeURIComponent(jobId)}`, { method: 'DELETE' });
+    state.sourceJob = null;
+    setSourceQueryRunning(false);
+    $('#sourceStatus').textContent = t('sourceCancelled');
+  } catch (error) { showNotice(error.message, true); }
 });
 
 $('#selectAllSources').addEventListener('change', (event) => {
@@ -1567,6 +2386,7 @@ function openEditor(memory) {
           const result = await api('/api/banks');
           state.session.bank_models = result.models;
           state.session.dirty = true;
+          await refreshTabs();
           renderSession();
           showNotice(`Channel ${memory.number} ${requested ? 'added to' : 'removed from'} ${mapping.name || `bank ${mapping.index}`}. Save the image to keep the change.`);
         } catch (error) {
@@ -1750,6 +2570,7 @@ $('#applySettings').addEventListener('click', async () => {
     }
     state.session.dirty = true;
     await loadSettings();
+    await refreshTabs();
     renderSession();
     showNotice(result.warnings.length
       ? `Settings applied with a warning: ${result.warnings.join('; ')}`
@@ -1818,6 +2639,7 @@ $('#editForm').addEventListener('submit', async (event) => {
         });
     state.session.dirty = true;
     await loadMemories();
+    await refreshTabs();
     closeEditor();
     const warnings = result.warnings || [];
     showNotice(warnings.length
@@ -1855,6 +2677,47 @@ $('#channelSearch').addEventListener('input', () => {
     try { await loadMemories(); } catch (error) { showNotice(error.message, true); }
   }, 250);
 });
+function renderFilters() {
+  $('#activeFilters').textContent = state.filters.length
+    ? state.filters.map((item) =>
+      `${item.field} ${item.operator} ${Array.isArray(item.value)
+        ? item.value.join(',') : item.value}`).join(` ${state.filterMatch.toUpperCase()} `)
+    : '';
+}
+
+$('#addFilter').addEventListener('click', async () => {
+  const field = $('#filterField').value;
+  const operator = $('#filterOperator').value;
+  const raw = $('#filterValue').value.trim();
+  if (!field || !raw) {
+    showNotice('Choose a field and enter a filter value.', true);
+    return;
+  }
+  let value = raw;
+  if (operator === 'range') {
+    value = raw.split(',').map((item) => Number(item.trim()));
+    if (value.length !== 2 || value.some((item) => !Number.isFinite(item))) {
+      showNotice('Range filters need two numbers separated by a comma.', true);
+      return;
+    }
+  } else if (operator === 'in') {
+    value = raw.split(',').map((item) => item.trim()).filter(Boolean);
+    if (!value.length) return;
+  }
+  state.filters.push({ field, operator, value });
+  state.filterMatch = $('#filterMatch').value;
+  state.start = 0;
+  state.selected.clear();
+  renderFilters();
+  try { await loadMemories(); } catch (error) { showNotice(error.message, true); }
+});
+$('#activeFilters').addEventListener('click', async () => {
+  if (!state.filters.length) return;
+  state.filters = [];
+  state.start = state.session.memory_bounds[0];
+  renderFilters();
+  try { await loadMemories(); } catch (error) { showNotice(error.message, true); }
+});
 $('#channelSort').addEventListener('change', async () => {
   state.sort = $('#channelSort').value;
   state.start = isFilteredView()
@@ -1890,6 +2753,9 @@ $('#autoBandplanEdits').addEventListener('change', () => {
   ['mode', 'showModeColumn'],
   ['shift', 'showShiftColumn'],
   ['tone', 'showToneColumn'],
+  ['power', 'showPowerColumn'],
+  ['comment', 'showCommentColumn'],
+  ['extra', 'showExtraColumn'],
 ].forEach(([column, id]) => {
   $(`#${id}`).addEventListener('change', () => {
     state.columns[column] = $(`#${id}`).checked;
@@ -2083,6 +2949,252 @@ $('#deleteSelected').addEventListener('click', async () => {
   }
 });
 
+function loadConnectionProfiles() {
+  try {
+    const profiles = JSON.parse(localStorage.getItem(CONNECTION_PROFILES_KEY) || '[]');
+    return Array.isArray(profiles) ? profiles.filter((profile) =>
+      profile && typeof profile.name === 'string' && typeof profile.radioId === 'string' &&
+      typeof profile.port === 'string').slice(0, 50) : [];
+  } catch {
+    return [];
+  }
+}
+
+function saveConnectionProfiles(profiles) {
+  localStorage.setItem(CONNECTION_PROFILES_KEY, JSON.stringify(profiles.slice(0, 50)));
+}
+
+function renderConnectionProfiles() {
+  const select = $('#connectionProfile');
+  const selected = select.value;
+  select.replaceChildren(new Option(t('chooseProfile'), ''));
+  loadConnectionProfiles().forEach((profile) => {
+    select.add(new Option(profile.name, profile.name));
+  });
+  select.value = [...select.options].some((option) => option.value === selected)
+    ? selected : '';
+  $('#loadConnectionProfile').disabled = !select.value;
+  $('#deleteConnectionProfile').disabled = !select.value;
+}
+
+function applyConnectionProfile(profile) {
+  if ([...$('#radioModel').options].some((option) => option.value === profile.radioId)) {
+    $('#radioModel').value = profile.radioId;
+  }
+  $('#manualSerialPort').value = profile.port;
+  $('#serialPort').value = [...$('#serialPort').options]
+    .some((option) => option.value === profile.port) ? profile.port : '';
+  $('#connectionProfileNotes').value = profile.notes || '';
+  saveConnectionPreferences();
+}
+
+$('#connectionProfile').addEventListener('change', () => {
+  const profile = loadConnectionProfiles().find(
+    (item) => item.name === $('#connectionProfile').value);
+  $('#connectionProfileNotes').value = profile?.notes || '';
+  $('#loadConnectionProfile').disabled = !profile;
+  $('#deleteConnectionProfile').disabled = !profile;
+});
+$('#saveConnectionProfile').addEventListener('click', () => {
+  const name = $('#connectionProfileName').value.trim();
+  if (!name) return showNotice(t('profileNameRequired'), true);
+  const profile = {
+    name, radioId: $('#radioModel').value, port: selectedPort(),
+    notes: $('#connectionProfileNotes').value.trim(),
+  };
+  const profiles = loadConnectionProfiles().filter((item) => item.name !== name);
+  profiles.push(profile);
+  try {
+    saveConnectionProfiles(profiles);
+    renderConnectionProfiles();
+    $('#connectionProfile').value = name;
+    showNotice(t('profileSaved'));
+  } catch (error) { showNotice(error.message, true); }
+});
+$('#loadConnectionProfile').addEventListener('click', () => {
+  const profile = loadConnectionProfiles().find(
+    (item) => item.name === $('#connectionProfile').value);
+  if (!profile) return;
+  applyConnectionProfile(profile);
+  showNotice(t('profileLoaded'));
+});
+$('#deleteConnectionProfile').addEventListener('click', () => {
+  const name = $('#connectionProfile').value;
+  if (!name) return;
+  saveConnectionProfiles(loadConnectionProfiles().filter((item) => item.name !== name));
+  renderConnectionProfiles();
+  showNotice(t('profileDeleted'));
+});
+$('#exportConnectionProfiles').addEventListener('click', () => {
+  downloadBlob('chirp-web-connection-profiles.json', new Blob([
+    JSON.stringify({ profiles: loadConnectionProfiles() }, null, 2),
+  ], { type: 'application/json' }));
+  showNotice(t('profilesExported'));
+});
+$('#importConnectionProfiles').addEventListener('change', async (event) => {
+  const file = event.target.files[0];
+  event.target.value = '';
+  if (!file || file.size > 1024 * 1024) return;
+  try {
+    const value = JSON.parse(await file.text());
+    const imported = Array.isArray(value) ? value : value.profiles;
+    if (!Array.isArray(imported)) throw new Error('This is not a connection profile export.');
+    const profiles = [...loadConnectionProfiles(), ...imported]
+      .filter((item) => item && typeof item.name === 'string' &&
+        typeof item.radioId === 'string' && typeof item.port === 'string')
+      .map(({ name, radioId, port, notes }) => ({
+        name: name.slice(0, 80), radioId, port, notes: typeof notes === 'string'
+          ? notes.slice(0, 500) : '',
+      }));
+    saveConnectionProfiles([...new Map(profiles.map((item) => [item.name, item])).values()]);
+    renderConnectionProfiles();
+    showNotice(t('profilesImported'));
+  } catch (error) { showNotice(error.message, true); }
+});
+
+async function loadSourceHistory() {
+  const container = $('#sourceHistoryRows');
+  try {
+    const response = await api('/api/sources/history');
+    const records = Array.isArray(response) ? response : response.records || [];
+    container.replaceChildren();
+    records.slice(0, 20).forEach((record) => {
+      const item = document.createElement('article');
+      item.className = 'history-item';
+      const title = document.createElement('strong');
+      title.textContent = record.source || record.source_id || 'Source job';
+      const detail = document.createElement('span');
+      const duration = Number.isFinite(record.duration_ms) ? ` · ${record.duration_ms} ms` : '';
+      detail.textContent = `${record.state || 'unknown'} · ${record.count ?? 0} results${duration}${record.error ? ` · ${record.error}` : ''}`;
+      const retry = document.createElement('button');
+      retry.type = 'button';
+      retry.className = 'button button-quiet';
+      retry.textContent = t('retry');
+      retry.disabled = !record.id;
+      retry.addEventListener('click', async () => {
+        try {
+          retry.disabled = true;
+          await api(`/api/sources/history/${encodeURIComponent(record.id)}/retry`, {
+            method: 'POST',
+          });
+          showNotice(t('sourceJobRestarted'));
+          await loadSourceHistory();
+        } catch (error) { showNotice(error.message, true); }
+      });
+      item.append(title, detail, retry);
+      container.append(item);
+    });
+    $('#sourceHistoryStatus').textContent = records.length
+      ? `${records.length} recent source job${records.length === 1 ? '' : 's'}.`
+      : t('sourceHistoryEmpty');
+  } catch (error) {
+    $('#sourceHistoryStatus').textContent = error.message;
+  }
+}
+
+$('#refreshSourceHistory').addEventListener('click', loadSourceHistory);
+$('#showAbout').addEventListener('click', async () => {
+  try {
+    const about = await api('/api/about');
+    const details = $('#aboutDetails');
+    details.replaceChildren();
+    [['Version', about.version], ['Python', about.python], ['Platform', about.platform]]
+      .forEach(([label, value]) => {
+        const term = document.createElement('dt');
+        const description = document.createElement('dd');
+        term.textContent = label;
+        description.textContent = value || '—';
+        details.append(term, description);
+      });
+    const releases = $('#checkReleases');
+    releases.href = about.release_url || '#';
+    releases.hidden = !about.release_url;
+    $('#aboutDialog').showModal();
+  } catch (error) { showNotice(error.message, true); }
+});
+$('#closeAbout').addEventListener('click', () => $('#aboutDialog').close());
+
+function textInputIsFocused() {
+  const focused = document.activeElement;
+  return focused instanceof HTMLInputElement || focused instanceof HTMLTextAreaElement ||
+    focused instanceof HTMLSelectElement || focused?.isContentEditable;
+}
+
+document.addEventListener('keydown', (event) => {
+  const modifier = event.ctrlKey || event.metaKey;
+  if (!modifier || event.altKey) return;
+  const key = event.key.toLowerCase();
+  const actions = {
+    o: ['imageFile', 'shortcutOpen'],
+    s: ['saveButton', 'shortcutSave'],
+    f: ['channelSearch', 'shortcutSearch'],
+    z: [event.shiftKey ? 'redoChange' : 'undoChange',
+      event.shiftKey ? 'shortcutRedo' : 'shortcutUndo'],
+  };
+  if (actions[key]) {
+    const [id, message] = actions[key];
+    const control = $(`#${id}`);
+    event.preventDefault();
+    if (!control.disabled) {
+      if (id === 'imageFile') control.click();
+      else if (id === 'channelSearch') control.focus();
+      else control.click();
+      showNotice(t(message));
+    }
+    return;
+  }
+  if (textInputIsFocused()) return;
+  const channelActions = { a: 'selectChannels', c: 'copySelected', x: 'cutSelected' };
+  if (key === 'v') {
+    event.preventDefault();
+    if (!$('#pasteSelected').disabled) {
+      $('#pasteSelected').click();
+      showNotice(t('shortcutPaste'));
+    } else if (!$('#pasteChannel').disabled) {
+      $('#pasteChannel').focus();
+      showNotice(t('shortcutPaste'));
+    }
+  } else if (channelActions[key]) {
+    event.preventDefault();
+    const control = $(`#${channelActions[key]}`);
+    if (!control.disabled) {
+      if (key === 'a') {
+        control.checked = true;
+        control.dispatchEvent(new Event('change', { bubbles: true }));
+      } else {
+        control.click();
+      }
+      showNotice(t(`shortcut${key === 'a' ? 'Select' : key === 'c' ? 'Copy' : 'Cut'}`));
+    }
+  }
+});
+
+document.addEventListener('dragover', (event) => {
+  if ([...event.dataTransfer?.types || []].includes('Files')) event.preventDefault();
+});
+document.addEventListener('dragenter', (event) => {
+  if (![...event.dataTransfer?.types || []].includes('Files')) return;
+  event.preventDefault();
+  event.target.closest('[data-drop-operation]')?.classList.add('drag-over');
+});
+document.addEventListener('dragleave', (event) => {
+  event.target.closest('[data-drop-operation]')?.classList.remove('drag-over');
+});
+document.addEventListener('drop', async (event) => {
+  const files = [...(event.dataTransfer?.files || [])];
+  if (!files.length) return;
+  event.preventDefault();
+  const target = event.target.closest('[data-drop-operation]');
+  document.querySelectorAll('.drag-over').forEach((element) =>
+    element.classList.remove('drag-over'));
+  const operation = target?.dataset.dropOperation || 'open';
+  const file = files[0];
+  showNotice(t(`dropped${operation[0].toUpperCase()}${operation.slice(1)}`));
+  if (operation === 'import') await importChannelsFile(file);
+  else if (operation === 'compare') await compareImageFile(file);
+  else await openImageFile(file);
+});
+
 async function initialize() {
   try {
     try {
@@ -2091,26 +3203,38 @@ async function initialize() {
       showNotice(`Saved view preferences could not be loaded: ${error.message}`,
         true);
     }
+    applyTranslations();
+    updateImportPlacement();
+    $('#languageSelect').addEventListener('change', () => {
+      state.language = $('#languageSelect').value;
+      savePreferences();
+      applyTranslations();
+      showNotice(t('scanComplete'));
+    });
     await Promise.all([
-      loadRadios(), loadPorts(), loadSources(), loadConfigurations(),
+      loadRadios(), loadPorts(), loadSources(), loadConfigurations(), loadSourceHistory(),
     ]);
     try {
       await loadRecentImages();
-      state.tabs = await readTabs();
-      renderTabs();
     } catch (error) {
       showNotice(`Browser recents are unavailable: ${error.message}`, true);
     }
-    if (state.tabs.length) {
-      await switchTab(state.tabs.at(-1).id);
-    } else {
-      try {
+    renderConnectionProfiles();
+    try {
+      const requestedTab = new URLSearchParams(window.location.search).get('tab');
+      if (requestedTab) {
+        state.activeTabId = requestedTab;
+        const session = await api(
+          `/api/session/tabs/${encodeURIComponent(requestedTab)}/activate`,
+          { method: 'POST' });
+        await refreshSession(session);
+      } else {
         await refreshSession();
-        renderSession();
-      } catch {
-        state.session = null;
-        renderSession();
       }
+      renderSession();
+    } catch {
+      state.session = null;
+      renderSession();
     }
   } catch (error) {
     showNotice(error.message, true);

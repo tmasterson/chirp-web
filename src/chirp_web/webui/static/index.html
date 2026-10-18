@@ -20,7 +20,7 @@
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <meta name="color-scheme" content="light">
-    <title>CHIRP Web Web</title>
+    <title data-i18n="pageTitle">CHIRP Web</title>
     <link rel="stylesheet" href="/static/style.css">
     <script src="/static/app.js" defer></script>
   </head>
@@ -30,16 +30,24 @@
         <span class="brand-mark" aria-hidden="true">C</span>
         <span>CHIRP<span class="brand-light">Qt</span></span>
       </a>
-      <span class="local-indicator"><span></span> LOCAL SESSION</span>
+      <span class="local-indicator"><span></span><span data-i18n="localSession">LOCAL SESSION</span></span>
+      <button id="showAbout" class="topbar-button" type="button" data-i18n="about">About</button>
+      <label class="language-picker" for="languageSelect">
+        <span class="visually-hidden">Language</span>
+        <select id="languageSelect" aria-label="Language">
+          <option value="en">English</option>
+          <option value="es">Español</option>
+        </select>
+      </label>
     </header>
 
     <main>
       <section class="intro">
-        <div class="eyebrow">RADIO PROGRAMMING, SIMPLIFIED</div>
-        <h1>Make your next channel change count.</h1>
-        <p>Work with a radio image, shape your channel list, and transfer it when you're ready.</p>
+        <div class="eyebrow" data-i18n="introEyebrow">RADIO PROGRAMMING, SIMPLIFIED</div>
+        <h1 data-i18n="introTitle">Make your next channel change count.</h1>
+        <p data-i18n="introText">Work with a radio image, shape your channel list, and transfer it when you're ready.</p>
       </section>
-      <section id="comparePanel" class="panel compare-panel" hidden>
+      <section id="comparePanel" class="panel compare-panel drop-target" data-drop-operation="compare" hidden>
         <div class="channels-heading">
           <div><div class="eyebrow">SOURCE IMAGE</div><h2 id="compareTitle">Compare channels</h2>
             <p>Select channels from the other image to copy into empty slots here.</p></div>
@@ -54,41 +62,70 @@
       <div id="notice" class="notice" role="status" aria-live="polite" hidden></div>
 
       <section class="workflow" aria-label="Radio image and transfer">
-        <article class="panel open-panel">
+        <article class="panel open-panel drop-target" data-drop-operation="open">
           <div class="panel-heading">
             <span class="step">01</span>
             <div><h2>Open an image</h2><p>Choose a radio image or CSV file from this computer.</p></div>
           </div>
-          <label class="file-picker" for="imageFile">
+          <label class="file-picker drop-target file-trigger" for="imageFile" data-drop-operation="open" role="button" tabindex="0">
             <span class="file-icon" aria-hidden="true">↑</span>
-            <span><strong>Choose a file</strong><small>IMG, CSV, ICF and supported formats · up to 20 MB</small></span>
+            <span><strong data-i18n="chooseFile">Choose a file</strong><small data-i18n="fileTypes">IMG, CSV, ICF and supported formats · up to 20 MB</small></span>
           </label>
           <input id="imageFile" class="visually-hidden" type="file"
                  accept=".img,.csv,.icf,.dat,.icf_ll">
           <div class="file-actions">
-            <label class="button button-quiet" for="importFile">Merge channels from file</label>
-            <label class="button button-quiet" for="compareFile">Compare / copy from image</label>
+            <label id="importDropTarget" class="button button-quiet drop-target file-trigger" for="importFile" data-drop-operation="import" role="button" tabindex="0" data-i18n="mergeFile">Merge channels from file</label>
+            <label id="compareDropTarget" class="button button-quiet drop-target file-trigger" for="compareFile" data-drop-operation="compare" role="button" tabindex="0" data-i18n="compareFile">Compare / copy from image</label>
             <input id="importFile" class="visually-hidden" type="file"
                    accept=".img,.csv,.icf,.dat,.icf_ll">
             <input id="compareFile" class="visually-hidden" type="file"
                    accept=".img,.csv,.icf,.dat,.icf_ll">
+          </div>
+          <div class="file-actions import-options">
+            <label class="field-label" for="importPlacement">Imported channels</label>
+            <select id="importPlacement">
+              <option value="empty">Fill empty slots</option>
+              <option value="matching">Overwrite matching channel numbers</option>
+              <option value="append">Append after the last used channel</option>
+              <option value="range">Overwrite from a destination channel</option>
+            </select>
+            <label id="importDestinationLabel" class="field-label" for="importDestination" hidden>Destination channel</label>
+            <input id="importDestination" type="number" min="0" hidden>
           </div>
           <div class="file-actions recent-actions">
             <label class="field-label" for="recentImages">Recent images</label>
             <select id="recentImages"><option value="">No recent images</option></select>
             <button id="openRecent" class="button button-quiet" type="button" disabled>Reopen</button>
           </div>
-          <div id="sessionInfo" class="session-info" hidden></div>
+          <div id="sessionInfo" class="session-info" role="status" aria-live="polite" hidden></div>
+          <div id="subdeviceControls" class="file-actions" hidden>
+            <label class="field-label" for="subdeviceSelect">Radio module</label>
+            <select id="subdeviceSelect"></select>
+          </div>
           <div class="file-actions">
             <button id="saveButton" class="button button-secondary" type="button" disabled>Save image to computer</button>
             <button id="exportCsv" class="button button-quiet" type="button" disabled>Export CSV</button>
+          </div>
+          <div class="file-actions">
+            <button id="showRadioInfo" class="button button-quiet" type="button" disabled>Radio information</button>
+            <button id="downloadDiagnostics" class="button button-quiet" type="button" disabled>Download diagnostics</button>
+            <button id="downloadBackup" class="button button-quiet" type="button" disabled>Latest backup</button>
+          </div>
+          <div class="file-actions">
+            <button id="manageBackups" class="button button-quiet" type="button" disabled>Manage backups</button>
+          </div>
+          <div class="file-actions">
+            <button id="supportReport" class="button button-quiet" type="button" data-i18n="supportReport">Support report</button>
+            <button id="exportRecovery" class="button button-quiet" type="button" data-i18n="recoveryExport">Export recovery</button>
+            <label class="button button-quiet file-trigger" for="restoreRecovery" role="button" tabindex="0" data-i18n="recoveryRestore">Restore recovery</label>
+            <input id="restoreRecovery" class="visually-hidden" type="file" accept="application/json,.json">
           </div>
           <div class="file-actions">
             <label class="field-label" for="configurationTemplate">New configuration</label>
             <select id="configurationTemplate"><option value="blank">Blank CSV image</option></select>
             <button id="newConfiguration" class="button button-quiet" type="button">Create</button>
           </div>
-          <div id="imageTabs" class="image-tabs" aria-label="Open image tabs"></div>
+          <div id="imageTabs" class="image-tabs" role="group" aria-label="Open image tabs"></div>
         </article>
 
         <article class="panel transfer-panel">
@@ -103,13 +140,40 @@
             <select id="serialPort"><option value="">No ports found</option></select>
             <button id="refreshPorts" class="icon-button" type="button" aria-label="Refresh serial ports" title="Refresh ports">↻</button>
           </div>
+          <label class="field-label" for="manualSerialPort" data-i18n="manualPort">Or enter a serial port</label>
+          <input id="manualSerialPort" class="manual-port" type="text" list="recentSerialPorts" autocomplete="off" placeholder="/dev/ttyUSB0 or COM3" data-i18n-placeholder="manualPortPlaceholder">
+          <datalist id="recentSerialPorts"></datalist>
+          <div class="scan-actions">
+            <button id="scanUsb" class="button button-quiet" type="button" data-i18n="scanUsb">Scan for USB radios</button>
+            <span id="portScanStatus" role="status" aria-live="polite"></span>
+          </div>
+          <div class="connection-profiles" aria-labelledby="connectionProfilesLabel">
+            <label id="connectionProfilesLabel" class="field-label" for="connectionProfile" data-i18n="connectionProfiles">Connection profiles</label>
+            <div class="profile-row">
+              <select id="connectionProfile"><option value="" data-i18n="chooseProfile">Choose a profile…</option></select>
+              <button id="loadConnectionProfile" class="button button-quiet" type="button" data-i18n="useProfile">Use</button>
+              <button id="deleteConnectionProfile" class="button button-quiet" type="button" data-i18n="delete">Delete</button>
+            </div>
+            <div class="profile-row">
+              <label class="visually-hidden" for="connectionProfileName">Profile name</label>
+              <input id="connectionProfileName" type="text" maxlength="80" data-i18n-placeholder="profileNamePlaceholder" placeholder="Profile name">
+              <button id="saveConnectionProfile" class="button button-quiet" type="button" data-i18n="saveProfile">Save profile</button>
+            </div>
+            <label class="visually-hidden" for="connectionProfileNotes" data-i18n="profileNotes">Notes</label>
+            <textarea id="connectionProfileNotes" maxlength="500" data-i18n-placeholder="profileNotesPlaceholder" placeholder="Notes (stored only in this browser)"></textarea>
+            <div class="profile-row">
+              <button id="exportConnectionProfiles" class="button button-quiet" type="button" data-i18n="exportProfiles">Export profiles</button>
+              <label class="button button-quiet file-trigger" for="importConnectionProfiles" role="button" tabindex="0" data-i18n="importProfiles">Import profiles</label>
+              <input id="importConnectionProfiles" class="visually-hidden" type="file" accept="application/json,.json">
+            </div>
+          </div>
           <div class="transfer-actions">
             <button id="downloadButton" class="button button-secondary" type="button">Read radio</button>
             <button id="uploadButton" class="button button-primary" type="button" disabled>Write to radio</button>
           </div>
           <div id="transferProgress" class="transfer-progress" hidden>
-            <div class="progress-track"><span id="progressBar"></span></div>
-            <div class="progress-label"><span id="progressMessage"></span><span id="progressPercent"></span></div>
+            <div class="progress-track"><span id="progressBar" role="progressbar" aria-label="Transfer progress" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0"></span></div>
+            <div class="progress-label"><span id="progressMessage" role="status" aria-live="polite"></span><span id="progressPercent"></span><button id="cancelTransfer" class="button button-quiet" type="button" hidden>Cancel transfer</button></div>
           </div>
         </article>
       </section>
@@ -132,6 +196,7 @@
           <div class="source-actions">
             <span id="sourceStatus" role="status">Choose a source and enter its search parameters.</span>
             <button id="querySource" class="button button-secondary" type="button">Search source</button>
+            <button id="cancelSourceQuery" class="button button-quiet" type="button" hidden data-i18n="cancelSearch">Cancel search</button>
           </div>
         </div>
         <div id="sourceResults" class="source-results" hidden>
@@ -141,11 +206,20 @@
           </div>
           <div class="table-wrap">
             <table>
-              <thead><tr><th></th><th>NAME</th><th>FREQUENCY</th><th>MODE</th><th>SHIFT</th></tr></thead>
+              <thead><tr><th scope="col"><span class="visually-hidden">Select</span></th><th scope="col">NAME</th><th scope="col">FREQUENCY</th><th scope="col">MODE</th><th scope="col">SHIFT</th></tr></thead>
               <tbody id="sourceRows"></tbody>
             </table>
           </div>
         </div>
+      </section>
+      <section class="panel source-history" aria-labelledby="sourceHistoryTitle">
+        <div class="channels-heading">
+          <div><div class="eyebrow" data-i18n="sourceHistoryEyebrow">SOURCE ACTIVITY</div>
+            <h2 id="sourceHistoryTitle" data-i18n="sourceHistory">Recent source jobs</h2></div>
+          <button id="refreshSourceHistory" class="button button-quiet" type="button" data-i18n="refresh">Refresh</button>
+        </div>
+        <div id="sourceHistoryStatus" class="settings-status" role="status"></div>
+        <div id="sourceHistoryRows" class="history-list"></div>
       </section>
 
       <section class="channels panel">
@@ -159,6 +233,31 @@
         <div class="channel-tools">
           <label class="channel-search-label" for="channelSearch">Search channels</label>
           <input id="channelSearch" type="search" placeholder="Name, frequency, mode, comment…" disabled>
+          <label for="filterField">Advanced filter</label>
+          <select id="filterField" disabled>
+            <option value="">None</option>
+            <option value="name">Name</option>
+            <option value="freq">Frequency (Hz)</option>
+            <option value="mode">Mode</option>
+            <option value="duplex">Duplex</option>
+            <option value="tmode">Tone mode</option>
+            <option value="comment">Comment</option>
+            <option value="skip">Skip</option>
+          </select>
+          <select id="filterOperator" aria-label="Filter operator" disabled>
+            <option value="contains">contains</option>
+            <option value="equals">equals</option>
+            <option value="matches">matches regex</option>
+            <option value="in">is one of (comma-separated)</option>
+            <option value="range">is in range (low,high)</option>
+          </select>
+          <input id="filterValue" type="text" placeholder="Filter value" aria-label="Filter value" disabled>
+          <select id="filterMatch" aria-label="Multiple filters match" disabled>
+            <option value="all">Match all</option>
+            <option value="any">Match any</option>
+          </select>
+          <button id="addFilter" class="button button-quiet" type="button" disabled>Add filter</button>
+          <span id="activeFilters" class="filter-summary"></span>
           <label for="channelSort">Sort by</label>
           <select id="channelSort" disabled>
             <option value="number">Channel number</option>
@@ -178,6 +277,9 @@
           <label><input id="showModeColumn" type="checkbox" checked disabled> Mode</label>
           <label><input id="showShiftColumn" type="checkbox" checked disabled> Shift</label>
           <label><input id="showToneColumn" type="checkbox" checked disabled> Tone</label>
+          <label><input id="showPowerColumn" type="checkbox" disabled> Power</label>
+          <label><input id="showCommentColumn" type="checkbox" disabled> Comment</label>
+          <label><input id="showExtraColumn" type="checkbox" disabled> Driver fields</label>
           <label for="gotoChannel">Go to</label>
           <input id="gotoChannel" type="number" min="0" aria-label="Channel number" disabled>
           <button id="gotoButton" class="button button-quiet" type="button" disabled>Go</button>
@@ -204,11 +306,21 @@
           </select>
           <button id="copySelected" class="button button-quiet" type="button" disabled>Copy</button>
           <button id="cutSelected" class="button button-quiet" type="button" disabled>Cut</button>
-          <input id="pasteChannel" type="number" min="0" placeholder="Paste at" disabled>
+          <input id="pasteChannel" type="number" min="0" placeholder="Paste at" aria-label="Paste destination channel" disabled>
           <button id="pasteSelected" class="button button-quiet" type="button" disabled>Paste</button>
           <button id="deleteSelected" class="button button-quiet" type="button" disabled>Delete selected</button>
           <button id="undoChange" class="button button-quiet" type="button" disabled>Undo</button>
           <button id="redoChange" class="button button-quiet" type="button" disabled>Redo</button>
+          <label for="compareOpenTab">Compare selected with</label>
+          <select id="compareOpenTab" disabled></select>
+          <button id="compareSelectedTab" class="button button-quiet" type="button" disabled>Show differences</button>
+          <label for="outputScope">Print / export</label>
+          <select id="outputScope" disabled>
+            <option value="auto">Current selection or view</option>
+            <option value="selected">Selected channels</option>
+            <option value="filtered">Filtered result set</option>
+            <option value="all">All programmed channels</option>
+          </select>
           <button id="printChannels" class="button button-quiet" type="button" disabled>Print / preview</button>
           <label class="field-label" for="bandplanSelect">Bandplan</label>
           <select id="bandplanSelect" disabled></select>
@@ -217,7 +329,7 @@
         <div class="table-wrap">
           <table>
             <thead>
-              <tr><th><input id="selectChannels" type="checkbox" aria-label="Select channels on this page" disabled></th><th>CH</th><th class="channel-name-column">NAME</th><th class="frequency-column">FREQUENCY</th><th class="tx-frequency-column" hidden>TX FREQUENCY</th><th class="mode-column">MODE</th><th class="shift-column">SHIFT</th><th class="tone-column">TONE</th><th></th></tr>
+              <tr><th scope="col"><input id="selectChannels" type="checkbox" aria-label="Select channels on this page" disabled></th><th scope="col">CH</th><th scope="col" class="channel-name-column">NAME</th><th scope="col" class="frequency-column">FREQUENCY</th><th scope="col" class="tx-frequency-column" hidden>TX FREQUENCY</th><th scope="col" class="mode-column">MODE</th><th scope="col" class="shift-column">SHIFT</th><th scope="col" class="tone-column">TONE</th><th scope="col" class="power-column">POWER</th><th scope="col" class="comment-column">COMMENT</th><th scope="col" class="extra-column">DRIVER FIELDS</th><th scope="col"><span class="visually-hidden">Actions</span></th></tr>
             </thead>
             <tbody id="memoryRows">
               <tr class="empty-state"><td colspan="8">Your channel list will appear here after you open an image.</td></tr>
@@ -260,11 +372,61 @@
           <button id="applySettings" class="button button-primary" type="button" disabled>Apply settings to image</button>
         </div>
       </section>
-      <footer>CHIRP Web · Your radio data stays on this computer.</footer>
+      <footer data-i18n="footer">CHIRP Web · Your radio data stays on this computer.</footer>
     </main>
     <section id="printContent" aria-label="Printable channel list"></section>
+    <dialog id="radioInfoDialog" class="edit-dialog" aria-labelledby="radioInfoTitle">
+      <div class="dialog-heading">
+        <div><div class="eyebrow">RADIO INFORMATION</div><h2 id="radioInfoTitle">Open image details</h2></div>
+        <button id="closeRadioInfo" class="icon-button" type="button" aria-label="Close radio information">×</button>
+      </div>
+      <pre id="radioInfoContent" class="radio-info-content"></pre>
+    </dialog>
+    <dialog id="backupDialog" class="edit-dialog" aria-labelledby="backupTitle">
+      <div class="dialog-heading">
+        <div><div class="eyebrow">LOCAL BACKUPS</div><h2 id="backupTitle">Retained backups</h2></div>
+        <button id="closeBackups" class="icon-button" type="button" aria-label="Close backup manager">×</button>
+      </div>
+      <p class="dialog-help">Transfer backups are temporary unless you opt in to a local backup directory. Retained backups remain on this computer until their retention limit removes the oldest files.</p>
+      <div class="backup-settings">
+        <label>Backup directory<input id="backupDirectory" type="text" maxlength="4096" placeholder="/home/you/chirp-backups"></label>
+        <label>Keep newest<input id="backupRetention" type="number" min="1" max="100" value="10"></label>
+        <button id="saveBackupSettings" class="button button-quiet" type="button">Save backup settings</button>
+        <button id="disableBackupStorage" class="button button-quiet" type="button">Use temporary backups only</button>
+      </div>
+      <div id="backupList" class="backup-list"></div>
+    </dialog>
+    <dialog id="tabCompareDialog" class="edit-dialog" aria-labelledby="tabCompareTitle">
+      <div class="dialog-heading">
+        <div><div class="eyebrow">CHANNEL COMPARISON</div><h2 id="tabCompareTitle">Differences between open images</h2></div>
+        <button id="closeTabCompare" class="icon-button" type="button" aria-label="Close channel comparison">×</button>
+      </div>
+      <div id="tabCompareResults" class="comparison-results"></div>
+    </dialog>
+    <dialog id="supportReportDialog" class="edit-dialog" aria-labelledby="supportReportTitle">
+      <form id="supportReportForm" method="dialog">
+        <div class="dialog-heading">
+          <div><div class="eyebrow">SUPPORT REPORT</div><h2 id="supportReportTitle" data-i18n="supportReport">Support report</h2></div>
+          <button id="closeSupportReport" class="icon-button" type="button" aria-label="Close support report">×</button>
+        </div>
+        <p id="supportReportHelp" class="dialog-help">Choose the files to include. Review the descriptions before downloading.</p>
+        <div id="supportReportFiles" class="report-files"></div>
+        <div class="dialog-actions">
+          <button id="cancelSupportReport" class="button button-quiet" type="button" data-i18n="cancel">Cancel</button>
+          <button id="downloadSupportReport" class="button button-primary" type="submit" data-i18n="downloadReport">Download report</button>
+        </div>
+      </form>
+    </dialog>
+    <dialog id="aboutDialog" class="edit-dialog" aria-labelledby="aboutTitle">
+      <div class="dialog-heading">
+        <div><div class="eyebrow" data-i18n="about">ABOUT</div><h2 id="aboutTitle" data-i18n="aboutChirp">About CHIRP Web</h2></div>
+        <button id="closeAbout" class="icon-button" type="button" aria-label="Close about dialog">×</button>
+      </div>
+      <dl id="aboutDetails" class="about-details"></dl>
+      <p class="dialog-help"><a id="checkReleases" href="#" target="_blank" rel="noopener" hidden data-i18n="checkReleases">Check for releases</a></p>
+    </dialog>
 
-    <dialog id="editDialog" class="edit-dialog">
+    <dialog id="editDialog" class="edit-dialog" aria-labelledby="editTitle">
       <form id="editForm" method="dialog">
         <div class="dialog-heading">
           <div><div class="eyebrow">CHANNEL EDITOR</div><h2 id="editTitle">Edit channel</h2></div>

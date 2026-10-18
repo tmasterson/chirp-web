@@ -18,15 +18,21 @@
 import base64
 import binascii
 import copy
+import contextvars
 import csv
 import io
+import json
 import logging
 import math
 import re
+import shutil
 import tempfile
 import threading
+import time
 import uuid
+import zipfile
 from concurrent.futures import ThreadPoolExecutor
+from dataclasses import dataclass, field
 from importlib import resources
 from pathlib import Path
 from typing import TypedDict
@@ -71,22 +77,242 @@ class WebServiceError(Exception):
         self.status_code = status_code
 
 
+class RedactedSerialTrace:
+    """Record serial activity without retaining radio payload contents."""
+
+    def __init__(self, pipe, trace):
+        self._pipe = pipe
+        self._trace = trace
+        self._started = time.monotonic()
+
+    def _record(self, direction, size):
+        self._trace.append(
+                f'{time.monotonic() - self._started:8.3f}s {direction} '
+                f'{size} byte(s)')
+        del self._trace[:-500]
+
+    def read(self, size=1):
+        data = self._pipe.read(size)
+        self._record('read', len(data))
+        return data
+
+    def write(self, data):
+        result = self._pipe.write(data)
+        self._record('write', len(data))
+        return result
+
+    def __getattr__(self, name):
+        return getattr(self._pipe, name)
+
+
+@dataclass
+class SessionTab:
+    """All mutable state associated with one open image or live radio."""
+
+    id: str
+    radio: object | None = None
+    source_name: str = ''
+    temp_path: str | None = None
+    dirty: bool = False
+    source_results: dict = field(default_factory=dict)
+    undo_stack: list = field(default_factory=list)
+    redo_stack: list = field(default_factory=list)
+    bandplan_name: str = 'north_america'
+    clipboard_results: dict = field(default_factory=dict)
+    live_port: object | None = None
+    backup_paths: list[str] = field(default_factory=list)
+    serial_trace: list[str] = field(default_factory=list)
+    subdevice_index: int = 0
+
+
 class DriverSession:
-    """Own the one local radio/image being edited by this app process."""
+    """Own local radio/image tabs edited by this app process."""
 
     def __init__(self):
-        """Initialize the single in-process radio session."""
+        """Initialize the server-owned image tabs."""
         self.lock = threading.RLock()
-        self.radio = None
-        self.source_name = ''
-        self.temp_path = None
-        self.dirty = False
+        self.tabs: dict[str, SessionTab] = {}
+        self.active_tab_id: str | None = None
+        self.request_tab_id = contextvars.ContextVar(
+                'chirp_web_tab_id', default=None)
         self.active_job = None
-        self.source_results = {}
-        self.undo_stack = []
-        self.redo_stack = []
-        self.bandplan_name = 'north_america'
-        self.clipboard_results = {}
+        self.backup_directory: Path | None = None
+        self.backup_retention = 10
+        self._new_tab()
+
+    @property
+    def _tab(self):
+        tab_id = self.request_tab_id.get() or self.active_tab_id
+        if tab_id is None:
+            raise WebServiceError('No active image tab.', 409)
+        try:
+            return self.tabs[tab_id]
+        except KeyError as exc:
+            raise WebServiceError('Image tab was not found.', 404) from exc
+
+    def use_tab(self, tab_id):
+        """Select one tab for the current HTTP request context."""
+        with self.lock:
+            if tab_id not in self.tabs:
+                raise WebServiceError('Image tab was not found.', 404)
+            return self.request_tab_id.set(tab_id)
+
+    def reset_tab(self, token):
+        """Restore the prior request-scoped tab selection."""
+        self.request_tab_id.reset(token)
+
+    def _new_tab(self):
+        tab = SessionTab(str(uuid.uuid4()))
+        self.tabs[tab.id] = tab
+        self.active_tab_id = tab.id
+        if self.request_tab_id.get() is not None:
+            self.request_tab_id.set(tab.id)
+        return tab
+
+    def activate_tab(self, tab_id):
+        with self.lock:
+            self._ensure_idle()
+            if tab_id not in self.tabs:
+                raise WebServiceError('Image tab was not found.', 404)
+            self.active_tab_id = tab_id
+            if self.request_tab_id.get() is not None:
+                self.request_tab_id.set(tab_id)
+            return self.describe()
+
+    def tabs_summary(self):
+        with self.lock:
+            selected = self.request_tab_id.get() or self.active_tab_id
+            return {
+                'active_tab_id': selected,
+                'tabs': [{
+                    'id': tab.id,
+                    'name': tab.radio.get_name() if tab.radio else 'New tab',
+                    'filename': tab.source_name or 'Untitled',
+                    'dirty': tab.dirty,
+                    'active': tab.id == selected,
+                } for tab in self.tabs.values()],
+            }
+
+    def is_live(self):
+        with self.lock:
+            return bool(
+                    self.active_tab_id and isinstance(
+                        self._tab.radio, chirp_common.LiveRadio) and
+                    self._tab.live_port is not None)
+
+    def close_tab(self):
+        with self.lock:
+            self._ensure_idle()
+            tab = self._tab
+            self._release_tab(tab)
+            del self.tabs[tab.id]
+            if not self.tabs:
+                self.active_tab_id = None
+            else:
+                self.active_tab_id = next(iter(self.tabs))
+            if self.active_tab_id is not None:
+                self.request_tab_id.set(self.active_tab_id)
+            return self.tabs_summary()
+
+    def reorder_tabs(self, tab_ids):
+        """Persist a user-requested image-tab order without changing state."""
+        with self.lock:
+            if len(tab_ids) != len(self.tabs) or set(tab_ids) != set(self.tabs):
+                raise WebServiceError('The requested tab order is invalid.',
+                                      422)
+            self.tabs = {tab_id: self.tabs[tab_id] for tab_id in tab_ids}
+            return self.tabs_summary()
+
+    @property
+    def radio(self):
+        return self._selected_radio(self._tab)
+
+    @radio.setter
+    def radio(self, value):
+        self._tab.radio = value
+        self._tab.subdevice_index = 0
+
+    @staticmethod
+    def _subdevices(tab):
+        if tab.radio is None or not tab.radio.get_features().has_sub_devices:
+            return [tab.radio] if tab.radio is not None else []
+        return list(tab.radio.get_sub_devices())
+
+    def _selected_radio(self, tab):
+        radios = self._subdevices(tab)
+        if not radios:
+            return None
+        tab.subdevice_index = min(tab.subdevice_index, len(radios) - 1)
+        return radios[tab.subdevice_index]
+
+    def select_subdevice(self, index):
+        """Select the module used by the current tab's editors."""
+        with self.lock:
+            self._ensure_idle()
+            radios = self._subdevices(self._tab)
+            if not radios:
+                raise WebServiceError('Open a radio image first.', 409)
+            if not 0 <= index < len(radios):
+                raise WebServiceError('The selected radio module was not found.',
+                                      404)
+            self._tab.subdevice_index = index
+            return self.describe()
+
+    @property
+    def source_name(self):
+        return self._tab.source_name
+
+    @source_name.setter
+    def source_name(self, value):
+        self._tab.source_name = value
+
+    @property
+    def temp_path(self):
+        return self._tab.temp_path
+
+    @temp_path.setter
+    def temp_path(self, value):
+        self._tab.temp_path = value
+
+    @property
+    def dirty(self):
+        return self._tab.dirty
+
+    @dirty.setter
+    def dirty(self, value):
+        self._tab.dirty = value
+
+    @property
+    def source_results(self):
+        return self._tab.source_results
+
+    @property
+    def undo_stack(self):
+        return self._tab.undo_stack
+
+    @undo_stack.setter
+    def undo_stack(self, value):
+        self._tab.undo_stack = value
+
+    @property
+    def redo_stack(self):
+        return self._tab.redo_stack
+
+    @redo_stack.setter
+    def redo_stack(self, value):
+        self._tab.redo_stack = value
+
+    @property
+    def bandplan_name(self):
+        return self._tab.bandplan_name
+
+    @bandplan_name.setter
+    def bandplan_name(self, value):
+        self._tab.bandplan_name = value
+
+    @property
+    def clipboard_results(self):
+        return self._tab.clipboard_results
 
     def _record_memory_change(self, before, after):
         if not before:
@@ -218,10 +444,12 @@ class DriverSession:
         suffix = Path(safe_name).suffix[:16] or '.img'
         with self.lock:
             self._ensure_idle()
+            if self.active_tab_id is None:
+                self._new_tab()
             if self.dirty and not confirm_replace:
                 raise WebServiceError(
-                        'Confirm that you want to discard unsaved changes.',
-                        409)
+                        'Confirm that you want to keep editing this image '
+                        'in a separate tab.', 409)
             handle = tempfile.NamedTemporaryFile(
                     prefix='chirp-web-', suffix=suffix, delete=False)
             new_path = handle.name
@@ -232,6 +460,8 @@ class DriverSession:
             except Exception:
                 Path(new_path).unlink(missing_ok=True)
                 raise
+            if self.radio is not None:
+                self._new_tab()
             self._replace_radio(radio, safe_name, new_path)
         return self.describe()
 
@@ -244,8 +474,105 @@ class DriverSession:
         self.undo_stack.clear()
         self.redo_stack.clear()
         self.source_results.clear()
+        self.clipboard_results.clear()
         if old_path and old_path != temp_path:
             Path(old_path).unlink(missing_ok=True)
+
+    @staticmethod
+    def _close_port(port):
+        try:
+            if port is not None and port.is_open:
+                port.close()
+        except Exception:
+            LOG.exception('Unable to close live radio serial port')
+
+    def _release_tab(self, tab):
+        self._close_port(tab.live_port)
+        if tab.temp_path:
+            Path(tab.temp_path).unlink(missing_ok=True)
+        for path in tab.backup_paths:
+            Path(path).unlink(missing_ok=True)
+
+    def backup_settings(self):
+        """Return the optional local directory used for retained backups."""
+        with self.lock:
+            return {
+                'directory': (str(self.backup_directory)
+                              if self.backup_directory else None),
+                'retention': self.backup_retention,
+            }
+
+    def configure_backup_storage(self, directory, retention):
+        """Configure explicitly requested on-disk backup retention."""
+        with self.lock:
+            if directory is None:
+                self.backup_directory = None
+                return self.backup_settings()
+            path = Path(directory).expanduser()
+            try:
+                path = path.resolve(strict=True)
+            except (OSError, RuntimeError) as exc:
+                raise WebServiceError(
+                        'The backup directory does not exist.', 422) from exc
+            if not path.is_dir():
+                raise WebServiceError(
+                        'The backup location must be a directory.', 422)
+            self.backup_directory = path
+            self.backup_retention = retention
+            self._prune_retained_backups()
+            return self.backup_settings()
+
+    def _retained_backup_paths(self):
+        if self.backup_directory is None:
+            return []
+        try:
+            return sorted(
+                    (path for path in self.backup_directory.glob(
+                        'chirp-web-backup-*') if path.is_file()),
+                    key=lambda path: path.stat().st_mtime)
+        except OSError as exc:
+            raise WebServiceError(
+                    'The retained backup directory is unavailable.', 500) from exc
+
+    def _prune_retained_backups(self):
+        paths = self._retained_backup_paths()
+        for path in paths[:-self.backup_retention]:
+            try:
+                path.unlink()
+            except OSError as exc:
+                raise WebServiceError(
+                        'An expired retained backup could not be removed.',
+                        500) from exc
+
+    def _backup_entries(self):
+        temporary = [{
+            'id': Path(path).name,
+            'filename': self._safe_name(self.source_name),
+            'created_at': int(Path(path).stat().st_mtime),
+            'persistent': False,
+        } for path in self._tab.backup_paths if Path(path).exists()]
+        retained = [{
+            'id': path.name,
+            'filename': path.name.split('-', 5)[-1],
+            'created_at': int(path.stat().st_mtime),
+            'persistent': True,
+        } for path in self._retained_backup_paths()]
+        return sorted(temporary + retained, key=lambda item: item['created_at'])
+
+    def _backup_file(self, backup_id):
+        if not re.fullmatch(r'[A-Za-z0-9._ -]{1,255}', backup_id):
+            raise WebServiceError('Backup was not found.', 404)
+        for path in self._tab.backup_paths:
+            if Path(path).name == backup_id and Path(path).is_file():
+                return Path(path)
+        if self.backup_directory is not None:
+            candidate = self.backup_directory / backup_id
+            if (candidate.name == backup_id and
+                    candidate.is_file() and
+                    candidate.parent == self.backup_directory and
+                    candidate.name.startswith('chirp-web-backup-')):
+                return candidate
+        raise WebServiceError('Backup was not found.', 404)
 
     def configurations(self):
         """Return built-in and bundled desktop configuration templates."""
@@ -266,6 +593,8 @@ class DriverSession:
         """Create a fresh CSV image or one of the packaged starter layouts."""
         with self.lock:
             self._ensure_idle()
+            if self.active_tab_id is None:
+                self._new_tab()
             builtin = CONFIGURATION_TEMPLATES.get(template_id)
             stock_file = next((
                 item for item in resources.files(
@@ -276,8 +605,8 @@ class DriverSession:
                 raise WebServiceError('Unknown configuration template.', 404)
             if self.dirty and not confirm_replace:
                 raise WebServiceError(
-                        'Confirm that you want to discard unsaved changes.',
-                        409)
+                        'Confirm that you want to keep editing this image '
+                        'in a separate tab.', 409)
             csv_class = directory.get_radio('Generic_CSV')
             handle = tempfile.NamedTemporaryFile(
                     prefix='chirp-web-new-', suffix='.csv', delete=False)
@@ -305,6 +634,8 @@ class DriverSession:
                 Path(temp_path).unlink(missing_ok=True)
                 raise
             filename = stock_file.name if stock_file else f'{template_id}.csv'
+            if self.radio is not None:
+                self._new_tab()
             self._replace_radio(radio, filename, temp_path)
             return self.describe()
 
@@ -358,16 +689,24 @@ class DriverSession:
         """Return the open radio's identity and supported memory features."""
         with self.lock:
             radio = self._require_radio()
+            parent_radio = self._tab.radio
             rf = radio.get_features()
             return {
+                'tab_id': self._tab.id,
                 'name': radio.get_name(),
                 'filename': self.source_name,
                 'dirty': self.dirty,
                 'supports_upload': isinstance(
-                        radio, chirp_common.CloneModeRadio),
+                        parent_radio, chirp_common.CloneModeRadio),
+                'is_live': isinstance(parent_radio, chirp_common.LiveRadio),
                 'has_settings': rf.has_settings,
                 'memory_bounds': list(rf.memory_bounds),
                 'valid_special_chans': list(rf.valid_special_chans),
+                'subdevices': [
+                    {'index': index, 'name': child.get_name()}
+                    for index, child in enumerate(self._subdevices(self._tab))
+                ],
+                'selected_subdevice': self._tab.subdevice_index,
                 'bank_models': [
                     self._bank_model_summary(model)
                     for model in radio.get_mapping_models()
@@ -406,6 +745,207 @@ class DriverSession:
                     'valid_skips': list(rf.valid_skips),
                 },
             }
+
+    def radio_info(self):
+        """Return safe, read-only identity and feature information."""
+        with self.lock:
+            radio = self._require_radio()
+            features = radio.get_features()
+            radio_class = getattr(radio, '_orig_rclass', radio.__class__)
+            metadata = {
+                str(key): str(value)
+                for key, value in getattr(radio, 'metadata', {}).items()
+                if key not in {'raw', 'mem_extra'}
+            }
+            return {
+                'name': radio.get_name(),
+                'driver': {
+                    'class': radio_class.__name__,
+                    'module': radio_class.__module__,
+                },
+                'image': {
+                    'filename': self.source_name,
+                    'metadata': metadata,
+                },
+                'features': {
+                    key: (
+                        [str(item) for item in getattr(features, key)]
+                        if isinstance(getattr(features, key), list)
+                        else str(getattr(features, key))
+                    )
+                    for key in features._valid_map
+                },
+            }
+
+    def create_backup(self, reason):
+        """Save a local, temporary pre-transfer copy of a clone image."""
+        with self.lock:
+            radio = self._tab.radio
+            if radio is None:
+                raise WebServiceError('Open a radio image before editing.', 409)
+            if not isinstance(radio, chirp_common.CloneModeRadio):
+                return None
+            suffix = Path(self.source_name).suffix or '.img'
+            handle = tempfile.NamedTemporaryFile(
+                    prefix=f'chirp-web-{reason}-', suffix=suffix,
+                    delete=False)
+            path = handle.name
+            handle.close()
+            try:
+                radio.save_mmap(path)
+            except Exception:
+                Path(path).unlink(missing_ok=True)
+                raise
+            tab = self._tab
+            tab.backup_paths.append(path)
+            for expired in tab.backup_paths[:-10]:
+                Path(expired).unlink(missing_ok=True)
+            del tab.backup_paths[:-10]
+            backup = {
+                'id': Path(path).name,
+                'reason': reason,
+                'created_at': int(time.time()),
+                'filename': self._safe_name(self.source_name),
+            }
+            if self.backup_directory is not None:
+                retained_name = (
+                    f'chirp-web-backup-{int(time.time())}-{uuid.uuid4().hex}-'
+                    f'{self._safe_name(self.source_name)}')
+                try:
+                    shutil.copyfile(path, self.backup_directory / retained_name)
+                    self._prune_retained_backups()
+                except OSError as exc:
+                    LOG.exception('Unable to retain backup in %s',
+                                  self.backup_directory)
+                    backup['retention_error'] = str(exc)
+            return backup
+
+    def backups(self):
+        with self.lock:
+            return self._backup_entries()
+
+    def backup_path(self, backup_id):
+        with self.lock:
+            return str(self._backup_file(backup_id))
+
+    def restore_backup(self, backup_id):
+        """Open a backup as an independent tab without replacing the current."""
+        with self.lock:
+            path = self._backup_file(backup_id)
+            data = base64.b64encode(path.read_bytes()).decode('ascii')
+            filename = path.name.split('-', 5)[-1]
+        return self.open_image(filename, data, confirm_replace=True)
+
+    def delete_backup(self, backup_id):
+        """Delete an explicitly selected retained backup."""
+        with self.lock:
+            path = self._backup_file(backup_id)
+            if path.parent != self.backup_directory:
+                raise WebServiceError(
+                        'Temporary backups expire with this tab and cannot '
+                        'be deleted individually.', 409)
+            try:
+                path.unlink()
+            except OSError as exc:
+                raise WebServiceError(
+                        'The retained backup could not be deleted.', 500) from exc
+            return {'deleted': backup_id}
+
+    def diagnostic_bundle(self):
+        """Build a local support archive without radio image contents."""
+        info = self.radio_info()
+        payload = json.dumps(info, indent=2, sort_keys=True).encode('utf-8')
+        output = io.BytesIO()
+        with zipfile.ZipFile(output, 'w', zipfile.ZIP_DEFLATED) as archive:
+            archive.writestr('radio-info.json', payload)
+            archive.writestr(
+                    'serial-trace.txt',
+                    '\n'.join(self._tab.serial_trace) + '\n')
+            archive.writestr(
+                    'README.txt',
+                    'This archive contains radio identity and capability '
+                    'metadata and a redacted serial activity trace. It does '
+                    'not include channel data, settings, serial payloads, '
+                    'or credentials.\n')
+        return output.getvalue()
+
+    def report_manifest(self):
+        """List reviewable, privacy-preserving support-report attachments."""
+        with self.lock:
+            self._require_radio()
+            return {'files': [
+                {'id': 'radio-info', 'name': 'radio-info.json',
+                 'description': 'Driver, image, and supported-feature data.',
+                 'default': True},
+                {'id': 'serial-trace', 'name': 'serial-trace.txt',
+                 'description': 'Redacted transfer timing and byte counts.',
+                 'default': True},
+                {'id': 'backups', 'name': 'backup-list.json',
+                 'description': 'Names of available local backups, not their '
+                                'contents.',
+                 'default': False},
+            ]}
+
+    def support_report(self, include):
+        """Build only the user-selected safe diagnostic files."""
+        allowed = {'radio-info', 'serial-trace', 'backups'}
+        requested = set(include)
+        if not requested or not requested <= allowed:
+            raise WebServiceError('Select one or more valid report files.',
+                                  422)
+        with self.lock:
+            self._require_radio()
+            output = io.BytesIO()
+            with zipfile.ZipFile(output, 'w', zipfile.ZIP_DEFLATED) as archive:
+                if 'radio-info' in requested:
+                    archive.writestr(
+                            'radio-info.json',
+                            json.dumps(self.radio_info(), indent=2,
+                                       sort_keys=True))
+                if 'serial-trace' in requested:
+                    archive.writestr(
+                            'serial-trace.txt',
+                            '\n'.join(self._tab.serial_trace) + '\n')
+                if 'backups' in requested:
+                    archive.writestr(
+                            'backup-list.json',
+                            json.dumps(self.backups(), indent=2))
+            return output.getvalue()
+
+    def recovery_export(self):
+        """Serialize eligible tabs for explicit browser download."""
+        with self.lock:
+            self._ensure_idle()
+            original = self.active_tab_id
+            tabs = []
+            skipped = []
+            for tab_id, tab in self.tabs.items():
+                if tab.radio is None:
+                    continue
+                if isinstance(tab.radio, chirp_common.LiveRadio):
+                    skipped.append(tab.source_name)
+                    continue
+                self.active_tab_id = tab_id
+                snapshot = self.save_image(mark_clean=False)
+                tabs.append(snapshot)
+            self.active_tab_id = original
+            return {'tabs': tabs, 'skipped': skipped}
+
+    def recovery_import(self, snapshots):
+        """Restore explicit browser-provided image snapshots as new tabs."""
+        if not snapshots:
+            raise WebServiceError('Recovery file contains no tabs.', 422)
+        opened = []
+        for snapshot in snapshots:
+            if not isinstance(snapshot, dict):
+                raise WebServiceError('Invalid recovery tab.', 422)
+            filename = snapshot.get('filename')
+            data = snapshot.get('data_base64')
+            if not isinstance(filename, str) or not isinstance(data, str):
+                raise WebServiceError('Invalid recovery tab.', 422)
+            opened.append(self.open_image(filename, data,
+                                          confirm_replace=True))
+        return {'opened': len(opened), 'active_tab_id': self.active_tab_id}
 
     @staticmethod
     def _settings_tree(radio_settings):
@@ -623,14 +1163,15 @@ class DriverSession:
 
     def memories(self, start: int, limit: int, search: str = '',
                  sort: str = 'number', direction: str = 'asc',
-                 hide_empty: bool = False):
+                 hide_empty: bool = False, filters=None, match='all'):
         """Read a bounded range of memories from the open image."""
         with self.lock:
             self._ensure_idle()
             radio = self._require_radio()
             features = radio.get_features()
             low, high = features.memory_bounds
-            if search or sort != 'number' or direction != 'asc' or hide_empty:
+            if (search or sort != 'number' or direction != 'asc' or
+                    hide_empty or filters):
                 rows = [
                     self._memory_dict(radio.get_memory(number))
                     for number in self._memory_ids(radio)
@@ -648,6 +1189,62 @@ class DriverSession:
                         ) or (
                             not row['empty'] and
                             needle in chirp_common.format_freq(row['freq'])
+                        )
+                    ]
+                if filters:
+                    if match not in ('all', 'any'):
+                        raise WebServiceError('Invalid filter match mode.', 422)
+
+                    def filter_match(row, item):
+                        field = item['field']
+                        operator = item['operator']
+                        value = item['value']
+                        candidate = row[field]
+                        if operator == 'contains':
+                            if not isinstance(value, str):
+                                raise WebServiceError(
+                                        'Contains filters require text.', 422)
+                            return value.casefold() in str(
+                                    candidate or '').casefold()
+                        if operator == 'matches':
+                            if not isinstance(value, str) or len(value) > 128:
+                                raise WebServiceError(
+                                        'Regex filters require short text.',
+                                        422)
+                            try:
+                                return bool(re.search(
+                                        value, str(candidate or ''),
+                                        re.IGNORECASE))
+                            except re.error as exc:
+                                raise WebServiceError(
+                                        'Invalid regular expression.', 422
+                                ) from exc
+                        if operator == 'in':
+                            if not isinstance(value, list) or not value:
+                                raise WebServiceError(
+                                        'In filters require one or more '
+                                        'values.', 422)
+                            return candidate in value or str(candidate) in {
+                                    str(item) for item in value}
+                        if operator == 'range':
+                            if (not isinstance(value, list) or len(value) != 2
+                                    or not all(
+                                        isinstance(item, (int, float))
+                                        for item in value)):
+                                raise WebServiceError(
+                                        'Range filters require two numbers.',
+                                        422)
+                            return value[0] <= (candidate or 0) <= value[1]
+                        if operator == 'equals':
+                            return candidate == value or str(candidate) == str(
+                                    value)
+                        raise WebServiceError('Unknown filter operator.', 422)
+
+                    rows = [
+                        row for row in rows if not row['empty'] and (
+                            all(filter_match(row, item) for item in filters)
+                            if match == 'all' else
+                            any(filter_match(row, item) for item in filters)
                         )
                     ]
 
@@ -1492,13 +2089,16 @@ class DriverSession:
             del self.source_results[token]
             return result
 
-    def import_image_memories(self, filename: str, encoded: str):
-        """Merge memories from an uploaded image into empty channels."""
+    def import_image_memories(self, filename: str, encoded: str,
+                              placement='empty', destination_start=None):
+        """Import memories from an uploaded image using an explicit policy."""
         memories = self._decode_image_memories(filename, encoded)
         if not memories:
             raise WebServiceError(
                     'The selected file contains no memories.', 422)
-        result = self._import_memories(memories)
+        result = self._import_memories(
+                memories, placement=placement,
+                destination_start=destination_start)
         result['source_count'] = len(memories)
         return result
 
@@ -1517,6 +2117,54 @@ class DriverSession:
                 for index, memory in enumerate(memories)
             ],
         }
+
+    def compare_tab_memories(self, tab_id, numbers):
+        """Return changed fields for selected channels in another open tab."""
+        with self.lock:
+            self._ensure_idle()
+            current = self._require_radio()
+            other_tab = self.tabs.get(tab_id)
+            if other_tab is None:
+                raise WebServiceError('Comparison image tab was not found.',
+                                      404)
+            if other_tab is self._tab:
+                raise WebServiceError(
+                        'Choose a different image tab for comparison.', 422)
+            other = self._selected_radio(other_tab)
+            if other is None:
+                raise WebServiceError('Comparison image is not open.', 409)
+            if not numbers or len(numbers) != len(set(numbers)):
+                raise WebServiceError(
+                        'Select one or more unique channels to compare.', 422)
+            other_low, other_high = other.get_features().memory_bounds
+            comparisons = []
+            fields = ('empty', *MEMORY_FIELDS)
+            for number in numbers:
+                self._validate_memory_id(current, number)
+                left = self._memory_dict(current.get_memory(number))
+                if (not isinstance(number, int) or
+                        not other_low <= number <= other_high):
+                    right = None
+                else:
+                    right = self._memory_dict(other.get_memory(number))
+                changes = {
+                    field: {
+                        'current': left[field],
+                        'other': right[field] if right is not None else None,
+                    }
+                    for field in fields
+                    if right is None or left[field] != right[field]
+                }
+                comparisons.append({
+                    'number': number,
+                    'equal': not changes,
+                    'changes': changes,
+                })
+            return {
+                'tab_id': tab_id,
+                'filename': other_tab.source_name,
+                'comparisons': comparisons,
+            }
 
     def _decode_image_memories(self, filename: str, encoded: str):
         """Decode a radio image and return its programmed memories."""
@@ -1552,19 +2200,59 @@ class DriverSession:
             finally:
                 Path(path).unlink(missing_ok=True)
 
-    def _import_memories(self, source_memories):
-        """Validate and copy memories into empty slots transactionally."""
+    def _import_memories(self, source_memories, placement='empty',
+                         destination_start=None):
+        """Validate and copy memories transactionally using one placement."""
         self._ensure_idle()
         radio = self._require_radio()
 
         low, high = radio.get_features().memory_bounds
+        if placement not in {'empty', 'matching', 'append', 'range'}:
+            raise WebServiceError('Unknown import placement policy.', 422)
+        if placement == 'range' and (
+                type(destination_start) is not int or
+                not low <= destination_start <= high):
+            raise WebServiceError(
+                    f'Destination must be between {low} and {high}.', 422)
+        if placement != 'range' and destination_start is not None:
+            raise WebServiceError(
+                    'A destination channel is valid only for range import.',
+                    422)
         empty_slots = [
             number for number in range(low, high + 1)
             if radio.get_memory(number).empty
         ]
-        if radio.get_features().has_infinite_number:
+        if radio.get_features().has_infinite_number and placement == 'empty':
             empty_slots.extend(
                     range(high + 1, high + len(source_memories) + 1))
+        if placement == 'empty':
+            destinations = empty_slots
+        elif placement == 'matching':
+            destinations = [memory.number for memory in source_memories]
+            if (any(type(number) is not int or not low <= number <= high
+                    for number in destinations) or
+                    len(destinations) != len(set(destinations))):
+                raise WebServiceError(
+                        'Matching import requires unique source channel '
+                        'numbers within the destination range.', 422)
+        else:
+            if placement == 'append':
+                used = [
+                    number for number in range(low, high + 1)
+                    if not radio.get_memory(number).empty
+                ]
+                destination_start = (max(used) + 1) if used else low
+            destinations = list(range(
+                    destination_start, destination_start + len(source_memories)))
+            if (destinations and destinations[-1] > high and
+                    not radio.get_features().has_infinite_number):
+                raise WebServiceError(
+                        'The destination range exceeds this radio’s channel '
+                        'bounds.', 409)
+        if len(destinations) < len(source_memories):
+            raise WebServiceError(
+                    'The open image does not have enough empty memory '
+                    'slots for the selected repeaters.', 409)
         prepared: list[
             tuple[
                 int,
@@ -1573,11 +2261,10 @@ class DriverSession:
             ]
         ] = []
         rejected: list[RejectedSourceResult] = []
-        for index, source_memory in enumerate(source_memories):
+        for index, (source_memory, destination) in enumerate(
+                zip(source_memories, destinations)):
             memory = copy.deepcopy(source_memory)
-            if len(prepared) >= len(empty_slots):
-                break
-            memory.number = empty_slots[len(prepared)]
+            memory.number = destination
             memory.empty = False
             warnings, errors = chirp_common.split_validation_msgs(
                     radio.validate_memory(memory))
@@ -1597,11 +2284,6 @@ class DriverSession:
             raise WebServiceError(
                     detail or 'No selected repeaters can be imported.',
                     422)
-        if len(prepared) < len(source_memories) - len(rejected):
-            raise WebServiceError(
-                    'The open image does not have enough empty memory '
-                    'slots for the selected repeaters.', 409)
-
         backups = {
             memory.number: (
                 copy.deepcopy(radio.get_memory(memory.number))
@@ -1647,20 +2329,66 @@ class DriverSession:
             'warnings': warnings,
         }
 
-    def export_csv(self):
-        """Return all programmed memories in standard CHIRP CSV format."""
+    def scoped_memories(self, scope, numbers=None, filters=None, match='all',
+                        search='', sort='number', direction='asc',
+                        hide_empty=False):
+        """Return programmed memories for an explicit print/export scope."""
         with self.lock:
             self._ensure_idle()
             radio = self._require_radio()
             low, high = radio.get_features().memory_bounds
+            if scope == 'all':
+                ids = range(low, high + 1)
+            elif scope == 'selected':
+                if not numbers or len(numbers) > 1000:
+                    raise WebServiceError(
+                            'Select between 1 and 1,000 channels.', 422)
+                if len(numbers) != len(set(numbers)):
+                    raise WebServiceError(
+                            'A channel can only be selected once.', 422)
+                for number in numbers:
+                    self._validate_memory_id(radio, number)
+                ids = numbers
+            elif scope == 'filtered':
+                result = self.memories(
+                        0, 1, search=search, sort=sort, direction=direction,
+                        hide_empty=hide_empty, filters=filters or [],
+                        match=match)
+                result = self.memories(
+                        0, result['total'], search=search, sort=sort,
+                        direction=direction, hide_empty=hide_empty,
+                        filters=filters or [], match=match)
+                ids = [row['number'] for row in result['memories']]
+            else:
+                raise WebServiceError('Unknown print or export scope.', 422)
+            return [
+                copy.deepcopy(radio.get_memory(number))
+                for number in ids if not radio.get_memory(number).empty
+            ]
+
+    def export_csv(self, scope='all', numbers=None, filters=None,
+                   match='all', search='', sort='number', direction='asc',
+                   hide_empty=False):
+        """Return selected programmed memories in standard CHIRP CSV format."""
+        with self.lock:
+            memories = self.scoped_memories(
+                    scope, numbers, filters, match, search, sort, direction,
+                    hide_empty)
             output = io.StringIO(newline='')
             writer = csv.writer(output)
             writer.writerow(chirp_common.Memory.CSV_FORMAT)
-            for number in range(low, high + 1):
-                memory = radio.get_memory(number)
-                if not memory.empty:
-                    writer.writerow(memory.to_csv())
+            for memory in memories:
+                writer.writerow(memory.to_csv())
             return output.getvalue()
+
+    def print_rows(self, scope, numbers=None, filters=None, match='all',
+                   search='', sort='number', direction='asc',
+                   hide_empty=False):
+        """Serialize the requested print scope without exposing radio state."""
+        memories = self.scoped_memories(
+                scope, numbers, filters, match, search, sort, direction,
+                hide_empty)
+        return {'memories': [self._memory_dict(memory) for memory in memories]}
 
     @staticmethod
     def _extra_value_node(value, path, label, owner):
@@ -1767,7 +2495,13 @@ class DriverSession:
         """Serialize the current image for the browser to download."""
         with self.lock:
             self._ensure_idle()
-            radio = self._require_radio()
+            radio = self._tab.radio
+            if radio is None:
+                raise WebServiceError('Open a radio image before editing.', 409)
+            if isinstance(radio, chirp_common.LiveRadio):
+                raise WebServiceError(
+                        'Live radios do not have an image to save. Export '
+                        'CSV to keep a channel-list copy.', 409)
             suffix = Path(self.source_name).suffix or '.img'
             handle = tempfile.NamedTemporaryFile(
                     prefix='chirp-web-save-', suffix=suffix, delete=False)
@@ -1792,19 +2526,13 @@ class DriverSession:
             }
 
     def close(self):
-        """Release the open image and its temporary backing file."""
+        """Release every open image and live-radio connection."""
         with self.lock:
             self._ensure_idle()
-            if self.temp_path:
-                Path(self.temp_path).unlink(missing_ok=True)
-            self.temp_path = None
-            self.radio = None
-            self.source_name = ''
-            self.dirty = False
-            self.undo_stack.clear()
-            self.redo_stack.clear()
-            self.source_results.clear()
-            self.clipboard_results.clear()
+            for tab in self.tabs.values():
+                self._release_tab(tab)
+            self.tabs.clear()
+            self.active_tab_id = None
 
 
 class TransferManager:
@@ -1820,18 +2548,57 @@ class TransferManager:
 
     @staticmethod
     def radios():
-        """Return clone-mode radios that support serial transfers."""
+        """Return clone-mode and live-mode radios that support serial I/O."""
         directory.import_drivers()
         result = []
         for ident, radio_class in sorted(directory.DRV_TO_RADIO.items()):
-            if not issubclass(radio_class, chirp_common.CloneModeRadio):
+            if not issubclass(
+                    radio_class,
+                    (chirp_common.CloneModeRadio, chirp_common.LiveRadio)):
                 continue
             result.append({
                 'id': ident,
                 'name': radio_class.get_name(),
-                'baud_rate': radio_class.BAUD_RATE,
+                'baud_rate': getattr(radio_class, 'BAUD_RATE', None),
+                'mode': ('live' if issubclass(
+                    radio_class, chirp_common.LiveRadio) else 'clone'),
             })
         return result
+
+    @staticmethod
+    def _prompts(radio_class, operation=None):
+        try:
+            prompts = radio_class.get_prompts()
+        except NameError as exc:
+            raise WebServiceError(
+                'This radio driver could not provide transfer instructions.',
+                500) from exc
+        keys = ('info', 'experimental', 'pre_download', 'pre_upload')
+        if operation == 'download':
+            keys = ('info', 'experimental', 'pre_download')
+        elif operation == 'upload':
+            keys = ('info', 'experimental', 'pre_upload')
+        return {
+            key: str(getattr(prompts, key, '') or '').strip()
+            for key in keys if getattr(prompts, key, '')
+        }
+
+    def prompts(self, radio_id):
+        """Return the selected driver's relevant user-facing instructions."""
+        try:
+            radio_class = directory.get_radio(radio_id)
+        except Exception as exc:
+            raise WebServiceError('Unknown radio model.', 404) from exc
+        return {'download': self._prompts(radio_class, 'download'),
+                'upload': self._prompts(radio_class, 'upload')}
+
+    def upload_prompts(self):
+        """Return prompt text for the image currently selected for upload."""
+        with self.session.lock:
+            radio = self.session._tab.radio
+            if radio is None:
+                raise WebServiceError('Open a radio image before editing.', 409)
+            return self._prompts(radio.__class__, 'upload')
 
     @staticmethod
     def ports():
@@ -1839,18 +2606,27 @@ class TransferManager:
         return [{'port': item.device, 'description': item.description}
                 for item in list_ports.comports()]
 
+    @staticmethod
+    def valid_port(port):
+        """Permit detected ports and explicit local serial device names."""
+        if '\x00' in port or len(port) > 512:
+            return False
+        if port in {item['port'] for item in TransferManager.ports()}:
+            return True
+        return (port.startswith('/dev/') or
+                bool(re.fullmatch(r'COM[1-9][0-9]*', port, re.IGNORECASE)))
+
     def start(self, operation: str, radio_id: str, port: str,
-              confirm: bool = False, confirm_replace: bool = False):
+              confirm: bool = False, confirm_replace: bool = False,
+              confirm_prompts: bool = False):
         """Validate and queue one upload or download operation."""
         with self.session.lock:
             self.session._ensure_idle()
-            if (operation == 'download' and self.session.dirty and
-                    not confirm_replace):
-                raise WebServiceError(
-                        'Confirm that you want to discard unsaved changes.',
-                        409)
             if operation == 'upload':
-                radio = self.session._require_radio()
+                radio = self.session._tab.radio
+                if radio is None:
+                    raise WebServiceError(
+                            'Open a radio image before editing.', 409)
                 if not isinstance(radio, chirp_common.CloneModeRadio):
                     raise WebServiceError(
                             'Upload is available only for clone-mode images.',
@@ -1865,15 +2641,22 @@ class TransferManager:
                     radio_class = directory.get_radio(radio_id)
                 except Exception as exc:
                     raise WebServiceError('Unknown radio model.', 404) from exc
-                if not issubclass(radio_class, chirp_common.CloneModeRadio):
+                if not issubclass(
+                        radio_class, (chirp_common.CloneModeRadio,
+                                      chirp_common.LiveRadio)):
                     raise WebServiceError(
-                            'Radio model does not support clone transfers.',
+                            'Radio model does not support serial transfers.',
                             422)
 
-            valid_ports = {item['port'] for item in self.ports()}
-            if port not in valid_ports:
+            if (self._prompts(radio_class, operation) and
+                    not confirm_prompts):
                 raise WebServiceError(
-                        'Select a serial port detected on this computer.',
+                        'Review and confirm this radio’s transfer '
+                        'instructions before continuing.', 409)
+            if not self.valid_port(port):
+                raise WebServiceError(
+                        'Select a detected port or provide a local serial '
+                        'device path.',
                         422)
             job_id = str(uuid.uuid4())
             job = {
@@ -1883,17 +2666,29 @@ class TransferManager:
                 'progress': 0,
                 'message': 'Starting transfer',
                 'error': None,
+                'cancelled': threading.Event(),
+                'pipe': None,
             }
             with self.lock:
                 self.jobs[job_id] = job
+            if operation == 'download':
+                self.session._new_tab()
+                job['tab_id'] = self.session.active_tab_id
             self.session.active_job = job_id
-            self.executor.submit(self._run, job_id, radio_class, port,
-                                 operation)
-            return dict(job)
+            self.executor.submit(
+                    self._run, job_id, radio_class, port, operation)
+            return self._public(job)
+
+    @staticmethod
+    def _public(job):
+        return {key: value for key, value in job.items()
+                if key not in {'cancelled', 'pipe'}}
 
     def _set_progress(self, job_id: str, status):
         with self.lock:
             job = self.jobs[job_id]
+            if job['cancelled'].is_set():
+                return
             maximum = status.max or 1
             job['progress'] = max(0, min(100, int(status.cur * 100 / maximum)))
             job['message'] = str(status.msg)
@@ -1903,35 +2698,79 @@ class TransferManager:
         temp_path = None
         failure = None
         try:
-            pipe = serial.Serial(port=port, timeout=0.5)
+            with self.lock:
+                job = self.jobs[job_id]
+            if job['cancelled'].is_set():
+                raise WebServiceError('Transfer was cancelled.', 409)
+            raw_pipe = serial.Serial(port=port, timeout=0.5)
+            with self.session.lock:
+                pipe = RedactedSerialTrace(
+                        raw_pipe, self.session._tab.serial_trace)
+            with self.lock:
+                self.jobs[job_id]['pipe'] = pipe
+            if job['cancelled'].is_set():
+                raise WebServiceError('Transfer was cancelled.', 409)
+            detected = getattr(radio_class, 'detect_from_serial', None)
+            if operation == 'download' and callable(detected):
+                try:
+                    detected_class = detected(pipe)
+                    if (isinstance(detected_class, type) and
+                            issubclass(detected_class, radio_class)):
+                        radio_class = detected_class
+                except Exception:
+                    LOG.info('Radio model detection was unavailable',
+                             exc_info=True)
             if operation == 'download':
                 radio = radio_class(pipe)
             else:
                 with self.session.lock:
-                    radio = self.session._require_radio()
+                    radio = self.session._tab.radio
+                    if radio is None:
+                        raise WebServiceError(
+                                'Open a radio image before editing.', 409)
                     radio.set_pipe(pipe)
             radio.status_fn = lambda status: self._set_progress(
                     job_id, status)
             if operation == 'download':
-                radio.sync_in()
-                handle = tempfile.NamedTemporaryFile(
-                        prefix='chirp-web-download-',
-                        suffix='.img',
-                        delete=False)
-                temp_path = handle.name
-                handle.close()
-                radio.save_mmap(temp_path)
-                with self.session.lock:
-                    self.session._replace_radio(
-                            radio, f'{radio_class.get_name()}.img', temp_path)
-                temp_path = None
+                if isinstance(radio, chirp_common.LiveRadio):
+                    with self.session.lock:
+                        self.session._replace_radio(
+                                radio, f'{radio_class.get_name()} (live)',
+                                None)
+                        self.session._tab.live_port = pipe
+                    pipe = None
+                else:
+                    radio.sync_in()
+                    handle = tempfile.NamedTemporaryFile(
+                            prefix='chirp-web-download-',
+                            suffix='.img',
+                            delete=False)
+                    temp_path = handle.name
+                    handle.close()
+                    radio.save_mmap(temp_path)
+                    with self.session.lock:
+                        self.session._replace_radio(
+                                radio, f'{radio_class.get_name()}.img',
+                                temp_path)
+                        temp_path = None
+                        try:
+                            self.session.create_backup('download')
+                        except Exception:
+                            LOG.exception('Unable to create download backup')
             else:
+                with self.session.lock:
+                    try:
+                        self.session.create_backup('upload')
+                    except Exception:
+                        LOG.exception('Unable to create upload backup')
                 radio.sync_out()
                 with self.session.lock:
                     self.session.dirty = False
         except Exception as exc:
             failure = exc
-            LOG.exception('Radio %s failed', operation)
+            if not (isinstance(exc, WebServiceError) and
+                    exc.status_code == 409):
+                LOG.exception('Radio %s failed', operation)
         finally:
             try:
                 if pipe is not None and pipe.is_open:
@@ -1947,7 +2786,13 @@ class TransferManager:
                 if self.session.active_job == job_id:
                     self.session.active_job = None
                 with self.lock:
-                    if failure is None:
+                    cancelled = self.jobs[job_id]['cancelled'].is_set()
+                    self.jobs[job_id]['pipe'] = None
+                    if cancelled:
+                        self.jobs[job_id].update(
+                                state='cancelled', message='Transfer cancelled',
+                                error=None)
+                    elif failure is None:
                         self.jobs[job_id].update(
                                 state='complete', progress=100,
                                 message='Transfer done')
@@ -1962,7 +2807,25 @@ class TransferManager:
             job = self.jobs.get(job_id)
             if job is None:
                 raise WebServiceError('Transfer job was not found.', 404)
-            return dict(job)
+            return self._public(job)
+
+    def cancel(self, job_id: str):
+        """Request cancellation by closing the active serial connection."""
+        with self.lock:
+            job = self.jobs.get(job_id)
+            if job is None:
+                raise WebServiceError('Transfer job was not found.', 404)
+            if job['state'] != 'running':
+                return self._public(job)
+            job['cancelled'].set()
+            job['message'] = 'Cancelling transfer'
+            pipe = job.get('pipe')
+        if pipe is not None:
+            try:
+                pipe.close()
+            except Exception:
+                LOG.exception('Unable to close serial port for cancellation')
+        return self._public(job)
 
     def close(self):
         """Stop accepting transfers and release session resources."""
