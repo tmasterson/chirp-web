@@ -341,6 +341,41 @@ def test_radio_info_diagnostics_and_structured_filters(client):
     assert filtered.json()['total'] == 1
 
 
+def test_advanced_diagnostics_require_opt_in_and_redact_transfer_trace(
+        client):
+    """Keep raw memory inspection explicit while exposing safe trace entries."""
+    first = chirp_common.Memory(0)
+    first.name = 'FIRST'
+    first.freq = 146520000
+    second = chirp_common.Memory(1)
+    second.name = 'SECOND'
+    second.freq = 446000000
+    assert client.post('/api/session/open', json={
+        'filename': 'channels.csv',
+        'data_base64': csv_image_with_memories([first, second]),
+    }).status_code == 200
+    assert client.get('/api/session/transfer-trace').json() == {
+        'entries': [],
+    }
+    raw = client.post('/api/memories/raw', json={'numbers': [0]})
+    assert raw.status_code == 409
+    enabled = client.patch('/api/session/advanced-diagnostics', json={
+        'enabled': True,
+    })
+    assert enabled.status_code == 200
+    assert enabled.json() == {'enabled': True}
+    raw = client.post('/api/memories/raw', json={'numbers': [0]})
+    assert raw.status_code == 200
+    assert raw.json()['memories'][0]['number'] == 0
+    assert raw.json()['memories'][0]['raw']
+    compared = client.post('/api/memories/raw-diff', json={
+        'numbers': [0, 1],
+    })
+    assert compared.status_code == 200
+    assert 'channel-0' in compared.json()['diff']
+    assert 'channel-1' in compared.json()['diff']
+
+
 def test_support_report_and_recovery_are_explicit_and_local(client):
     """Let users review support files and restore downloaded image drafts."""
     opened = client.post('/api/session/open', json={

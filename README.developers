@@ -71,3 +71,19 @@ to the registered Python radio drivers. Hardware transfer testing requires a
 radio and serial interface; API tests use file-backed CSV images instead.
 
 ========
+Driver change checklist
+
+When adding or changing a driver:
+
+* Keep its registration and public class names compatible with upstream CHIRP
+  conventions.
+* Verify that `directory.import_drivers()` imports and registers the driver.
+* Add or update a fixture-based parse/save test when an image fixture is
+  available; do not require physical hardware for unit coverage.
+* Exercise clone protocol changes with an existing simulator when one exists.
+* Run the focused driver tests, then the package and web API tests for changes
+  that affect feature reporting, image detection, settings, or memories.
+* Preserve unknown image fields and use driver comments to record hardware
+  behavior that has not been confirmed.
+
+========

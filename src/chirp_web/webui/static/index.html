@@ -22,7 +22,7 @@
     <meta name="color-scheme" content="light">
     <title data-i18n="pageTitle">CHIRP Web</title>
     <link rel="stylesheet" href="/static/style.css">
-    <script src="/static/app.js" defer></script>
+    <script type="module" src="/static/app.js"></script>
   </head>
   <body>
     <header class="topbar">
@@ -306,11 +306,15 @@
           </select>
           <button id="copySelected" class="button button-quiet" type="button" disabled>Copy</button>
           <button id="cutSelected" class="button button-quiet" type="button" disabled>Cut</button>
+          <button id="copyPortable" class="button button-quiet" type="button" disabled>Copy CSV</button>
+          <button id="pastePortable" class="button button-quiet" type="button" disabled>Paste CSV / TSV</button>
           <input id="pasteChannel" type="number" min="0" placeholder="Paste at" aria-label="Paste destination channel" disabled>
           <button id="pasteSelected" class="button button-quiet" type="button" disabled>Paste</button>
           <button id="deleteSelected" class="button button-quiet" type="button" disabled>Delete selected</button>
           <button id="undoChange" class="button button-quiet" type="button" disabled>Undo</button>
           <button id="redoChange" class="button button-quiet" type="button" disabled>Redo</button>
+          <button id="viewTransferTrace" class="button button-quiet" type="button" disabled>Transfer trace</button>
+          <button id="advancedDiagnostics" class="button button-quiet" type="button" disabled>Advanced diagnostics</button>
           <label for="compareOpenTab">Compare selected with</label>
           <select id="compareOpenTab" disabled></select>
           <button id="compareSelectedTab" class="button button-quiet" type="button" disabled>Show differences</button>
@@ -424,6 +428,27 @@
       </div>
       <dl id="aboutDetails" class="about-details"></dl>
       <p class="dialog-help"><a id="checkReleases" href="#" target="_blank" rel="noopener" hidden data-i18n="checkReleases">Check for releases</a></p>
+    </dialog>
+    <dialog id="transferTraceDialog" class="edit-dialog" aria-labelledby="transferTraceTitle">
+      <div class="dialog-heading">
+        <div><div class="eyebrow">TRANSFER DIAGNOSTICS</div><h2 id="transferTraceTitle">Redacted serial trace</h2></div>
+        <button id="closeTransferTrace" class="icon-button" type="button" aria-label="Close transfer trace">×</button>
+      </div>
+      <p class="dialog-help">This timeline records operation timing and byte counts only. It never includes radio payload data.</p>
+      <pre id="transferTraceContent" class="radio-info-content"></pre>
+    </dialog>
+    <dialog id="advancedDiagnosticsDialog" class="edit-dialog" aria-labelledby="advancedDiagnosticsTitle">
+      <div class="dialog-heading">
+        <div><div class="eyebrow">ADVANCED DIAGNOSTICS</div><h2 id="advancedDiagnosticsTitle">Raw memory inspector</h2></div>
+        <button id="closeAdvancedDiagnostics" class="icon-button" type="button" aria-label="Close advanced diagnostics">×</button>
+      </div>
+      <p class="dialog-help">Select one channel to inspect or two to compare before opening this dialog. Raw values are read-only driver internals and may expose channel data stored in this local image.</p>
+      <label class="advanced-toggle"><input id="enableAdvancedDiagnostics" type="checkbox"> Enable raw-memory inspection for this local session</label>
+      <div class="dialog-actions">
+        <button id="viewRawMemory" class="button button-quiet" type="button">View selected channel</button>
+        <button id="diffRawMemory" class="button button-quiet" type="button">Compare two selected channels</button>
+      </div>
+      <pre id="rawMemoryContent" class="radio-info-content"></pre>
     </dialog>
 
     <dialog id="editDialog" class="edit-dialog" aria-labelledby="editTitle">

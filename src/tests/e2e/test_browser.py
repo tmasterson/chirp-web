@@ -158,6 +158,38 @@ def test_browser_channel_edit_workflow(browser, file_upload, tmp_path):
         (By.ID, 'aboutDialog')))
 
 
+def test_browser_advanced_diagnostics_are_explicit_and_read_only(
+        browser, file_upload, tmp_path):
+    """Show the safe trace and require an opt-in for raw driver internals."""
+    image = tmp_path / 'diagnostics.csv'
+    image.write_text(_channel_csv())
+    file_upload('imageFile', image)
+    _wait(browser, conditions.text_to_be_present_in_element(
+        (By.ID, 'sessionInfo'), 'Generic CSV'))
+
+    browser.find_element(By.ID, 'viewTransferTrace').click()
+    _wait(browser, conditions.visibility_of_element_located(
+        (By.ID, 'transferTraceDialog')))
+    assert 'No serial transfer activity' in browser.find_element(
+        By.ID, 'transferTraceContent').text
+    browser.find_element(By.ID, 'closeTransferTrace').click()
+
+    browser.find_element(By.ID, 'advancedDiagnostics').click()
+    _wait(browser, conditions.visibility_of_element_located(
+        (By.ID, 'advancedDiagnosticsDialog')))
+    browser.find_element(By.ID, 'enableAdvancedDiagnostics').click()
+    browser.find_element(By.ID, 'closeAdvancedDiagnostics').click()
+    browser.find_element(
+        By.CSS_SELECTOR, '#memoryRows input[type="checkbox"]').click()
+    browser.find_element(By.ID, 'advancedDiagnostics').click()
+    _wait(browser, conditions.visibility_of_element_located(
+        (By.ID, 'advancedDiagnosticsDialog')))
+    browser.find_element(By.ID, 'viewRawMemory').click()
+    _wait(browser, lambda driver: bool(driver.find_element(
+        By.ID, 'rawMemoryContent').text))
+    browser.find_element(By.ID, 'closeAdvancedDiagnostics').click()
+
+
 def test_browser_accessibility_semantics_and_keyboard_controls(browser):
     """Check accessible names, live regions, dialog labels, and tab controls."""
     missing_names = browser.execute_script("""

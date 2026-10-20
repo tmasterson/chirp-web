@@ -6,6 +6,7 @@
 **.rej
 .venv
 out
+build
 dist
 build/bdist
 src/tools/cpep8.venv/

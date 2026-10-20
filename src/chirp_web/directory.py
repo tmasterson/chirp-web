@@ -97,6 +97,13 @@ def detected_by(manager_class):
     return wrapper
 
 
+def minorvariant(cls):
+    """Mark a registered radio class as a non-user-selectable minor variant."""
+    assert issubclass(cls, chirp_common.CloneModeRadio)
+    cls._MINOR_VARIANT = True
+    return cls
+
+
 DRV_TO_RADIO: dict[str, type[chirp_common.Radio]] = {}
 RADIO_TO_DRV: dict[type[chirp_common.Radio], str] = {}
 AUX_FORMATS: set[tuple] = set()

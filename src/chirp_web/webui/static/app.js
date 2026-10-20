@@ -15,198 +15,10 @@
  * along with this program.  If not, see <http://www.gnu.org/licenses/>.
  */
 
-const state = {
-  session: null,
-  start: 0,
-  limit: 50,
-  total: 0,
-  pageMemories: [],
-  selected: new Set(),
-  search: '',
-  filters: [],
-  filterMatch: 'all',
-  sort: 'number',
-  direction: 'asc',
-  hideEmpty: false,
-  txFrequencyWorkflow: false,
-  columns: {
-    name: true, frequency: true, mode: true, shift: true, tone: true,
-    power: false, comment: false, extra: false,
-  },
-  autoBandplanEdits: false,
-  memoryRequest: 0,
-  busy: false,
-  editing: null,
-  settings: null,
-  settingValues: new Map(),
-  sources: [],
-  sourceResults: null,
-  comparison: null,
-  history: { can_undo: false, can_redo: false },
-  clipboardId: null,
-  tabs: [],
-  activeTabId: null,
-  language: 'en',
-  sourceJob: null,
-  transferJob: null,
-  focusedMemory: null,
-  columnRadioId: null,
-};
+import { $, CONNECTION_PREFERENCES_KEY, CONNECTION_PROFILES_KEY, IMAGE_EXTENSIONS, notice, PREFERENCES_KEY, state, translations } from './state.js';
+import { api } from './api.js';
+import { extraColumnValue, formatFrequency, tsvToCsv, txFrequency } from './utils.js';
 
-const $ = (selector) => document.querySelector(selector);
-const notice = $('#notice');
-const PREFERENCES_KEY = 'chirp-web-view-preferences';
-const CONNECTION_PREFERENCES_KEY = 'chirp-web-connection-preferences';
-const CONNECTION_PROFILES_KEY = 'chirp-web-connection-profiles';
-const IMAGE_EXTENSIONS = /\.(img|csv|icf|dat|icf_ll)$/i;
-const translations = {
-  en: {
-    pageTitle: 'CHIRP Web',
-    localSession: 'LOCAL SESSION',
-    about: 'About',
-    aboutChirp: 'About CHIRP Web',
-    checkReleases: 'Check for releases',
-    introEyebrow: 'RADIO PROGRAMMING, SIMPLIFIED',
-    introTitle: 'Make your next channel change count.',
-    introText: 'Work with a radio image, shape your channel list, and transfer it when you’re ready.',
-    chooseFile: 'Choose a file',
-    fileTypes: 'IMG, CSV, ICF and supported formats · up to 20 MB',
-    mergeFile: 'Merge channels from file',
-    compareFile: 'Compare / copy from image',
-    connectionProfiles: 'Connection profiles',
-    chooseProfile: 'Choose a profile…',
-    useProfile: 'Use',
-    delete: 'Delete',
-    profileNamePlaceholder: 'Profile name',
-    profileNotes: 'Notes',
-    profileNotesPlaceholder: 'Notes (stored only in this browser)',
-    saveProfile: 'Save profile',
-    exportProfiles: 'Export profiles',
-    importProfiles: 'Import profiles',
-    sourceHistoryEyebrow: 'SOURCE ACTIVITY',
-    sourceHistory: 'Recent source jobs',
-    refresh: 'Refresh',
-    retry: 'Retry',
-    sourceJobRestarted: 'Source job restarted.',
-    sourceHistoryEmpty: 'No recent source jobs.',
-    footer: 'CHIRP Web · Your radio data stays on this computer.',
-    profileSaved: 'Connection profile saved.',
-    profileDeleted: 'Connection profile deleted.',
-    profileLoaded: 'Connection profile loaded.',
-    profilesImported: 'Connection profiles imported.',
-    profilesExported: 'Connection profiles exported.',
-    profileNameRequired: 'Enter a profile name.',
-    droppedOpen: 'Opening dropped image…',
-    droppedImport: 'Merging dropped channels…',
-    droppedCompare: 'Comparing dropped image…',
-    invalidImageFile: 'Choose a supported image file (IMG, CSV, ICF, or DAT).',
-    imageTooLarge: 'Choose an image smaller than 20 MB.',
-    importTooLarge: 'Choose a channel file smaller than 20 MB.',
-    openDestinationFirst: 'Open a destination image before merging channels.',
-    shortcutOpen: 'Open image file picker.',
-    shortcutSave: 'Saving image.',
-    shortcutSearch: 'Channel search focused.',
-    shortcutUndo: 'Undoing latest change.',
-    shortcutRedo: 'Redoing latest change.',
-    shortcutSelect: 'Visible channels selected.',
-    shortcutCopy: 'Copying selected channels.',
-    shortcutCut: 'Cutting selected channels.',
-    shortcutPaste: 'Paste destination focused.',
-    manualPort: 'Or enter a serial port',
-    manualPortPlaceholder: '/dev/ttyUSB0 or COM3',
-    scanUsb: 'Scan for USB radios',
-    scanningUsb: 'Scanning USB ports…',
-    scanComplete: 'USB scan complete.',
-    languageChanged: 'Language updated.',
-    supportReport: 'Support report',
-    recoveryExport: 'Export recovery',
-    recoveryRestore: 'Restore recovery',
-    cancel: 'Cancel',
-    downloadReport: 'Download report',
-    reportReady: 'Support report downloaded.',
-    recoveryExported: 'Recovery file downloaded.',
-    recoveryRestored: 'Recovery restored.',
-    sourceSearching: 'Searching the network source…',
-    sourceCancelled: 'Source search cancelled.',
-    cancelSearch: 'Cancel search',
-    readRadio: 'Read radio',
-    writeRadio: 'Write to radio',
-    searchSource: 'Search source',
-  },
-  es: {
-    pageTitle: 'CHIRP Web',
-    localSession: 'SESIÓN LOCAL',
-    about: 'Acerca de',
-    aboutChirp: 'Acerca de CHIRP Web',
-    checkReleases: 'Buscar versiones',
-    introEyebrow: 'PROGRAMACIÓN DE RADIO, SIMPLIFICADA',
-    introTitle: 'Haz que tu próximo cambio de canal cuente.',
-    introText: 'Trabaja con una imagen de radio, organiza tu lista de canales y transfiérela cuando estés listo.',
-    chooseFile: 'Elegir un archivo',
-    fileTypes: 'IMG, CSV, ICF y formatos compatibles · hasta 20 MB',
-    mergeFile: 'Combinar canales desde archivo',
-    compareFile: 'Comparar / copiar desde imagen',
-    connectionProfiles: 'Perfiles de conexión',
-    chooseProfile: 'Elige un perfil…',
-    useProfile: 'Usar',
-    delete: 'Eliminar',
-    profileNamePlaceholder: 'Nombre del perfil',
-    profileNotes: 'Notas',
-    profileNotesPlaceholder: 'Notas (guardadas solo en este navegador)',
-    saveProfile: 'Guardar perfil',
-    exportProfiles: 'Exportar perfiles',
-    importProfiles: 'Importar perfiles',
-    sourceHistoryEyebrow: 'ACTIVIDAD DE FUENTES',
-    sourceHistory: 'Trabajos recientes de fuentes',
-    refresh: 'Actualizar',
-    retry: 'Reintentar',
-    sourceJobRestarted: 'Trabajo de fuente reiniciado.',
-    sourceHistoryEmpty: 'No hay trabajos recientes de fuentes.',
-    footer: 'CHIRP Web · Los datos de tu radio permanecen en este equipo.',
-    profileSaved: 'Perfil de conexión guardado.',
-    profileDeleted: 'Perfil de conexión eliminado.',
-    profileLoaded: 'Perfil de conexión cargado.',
-    profilesImported: 'Perfiles de conexión importados.',
-    profilesExported: 'Perfiles de conexión exportados.',
-    profileNameRequired: 'Introduce un nombre de perfil.',
-    droppedOpen: 'Abriendo imagen soltada…',
-    droppedImport: 'Combinando canales soltados…',
-    droppedCompare: 'Comparando imagen soltada…',
-    invalidImageFile: 'Elige un archivo de imagen compatible (IMG, CSV, ICF o DAT).',
-    imageTooLarge: 'Elige una imagen de menos de 20 MB.',
-    importTooLarge: 'Elige un archivo de canales de menos de 20 MB.',
-    openDestinationFirst: 'Abre una imagen de destino antes de combinar canales.',
-    shortcutOpen: 'Selector de imagen abierto.',
-    shortcutSave: 'Guardando imagen.',
-    shortcutSearch: 'Búsqueda de canales enfocada.',
-    shortcutUndo: 'Deshaciendo el último cambio.',
-    shortcutRedo: 'Rehaciendo el último cambio.',
-    shortcutSelect: 'Canales visibles seleccionados.',
-    shortcutCopy: 'Copiando canales seleccionados.',
-    shortcutCut: 'Cortando canales seleccionados.',
-    shortcutPaste: 'Destino de pegado enfocado.',
-    manualPort: 'O introduzca un puerto serie',
-    manualPortPlaceholder: '/dev/ttyUSB0 o COM3',
-    scanUsb: 'Buscar radios USB',
-    scanningUsb: 'Buscando puertos USB…',
-    scanComplete: 'Búsqueda USB terminada.',
-    languageChanged: 'Idioma actualizado.',
-    supportReport: 'Informe de soporte',
-    recoveryExport: 'Exportar recuperación',
-    recoveryRestore: 'Restaurar recuperación',
-    cancel: 'Cancelar',
-    downloadReport: 'Descargar informe',
-    reportReady: 'Informe de soporte descargado.',
-    recoveryExported: 'Archivo de recuperación descargado.',
-    recoveryRestored: 'Recuperación restaurada.',
-    sourceSearching: 'Buscando en la fuente de red…',
-    sourceCancelled: 'Búsqueda de fuente cancelada.',
-    cancelSearch: 'Cancelar búsqueda',
-    readRadio: 'Leer radio',
-    writeRadio: 'Escribir en radio',
-    searchSource: 'Buscar fuente',
-  },
-};
 
 function t(key) {
   return translations[state.language]?.[key] || translations.en[key] || key;
@@ -320,44 +132,6 @@ function renderRecentPorts(ports = loadConnectionPreferences().recentPorts || []
 function isFilteredView() {
   return Boolean(state.search || state.sort !== 'number' ||
     state.direction !== 'asc' || state.hideEmpty || state.filters.length);
-}
-
-async function api(path, options = {}) {
-  const route = path.split('?', 1)[0];
-  const stateful = route !== '/api/session/tabs' && (
-    route.startsWith('/api/session') ||
-    route.startsWith('/api/memories') ||
-    route.startsWith('/api/banks') ||
-    route.startsWith('/api/settings') ||
-    route.startsWith('/api/bandplans') ||
-    route.startsWith('/api/transfers') ||
-    route === '/api/sources/import'
-  );
-  const liveMutation = state.session?.is_live &&
-    ['POST', 'PATCH'].includes((options.method || 'GET').toUpperCase()) &&
-    (route !== '/api/memories/query' && (route.startsWith('/api/memories/') ||
-      ['/api/settings', '/api/banks', '/api/sources/import',
-        '/api/session/import'].includes(route)));
-  if (liveMutation && !window.confirm(
-    'Apply this change immediately to the connected live radio?')) {
-    throw new Error('Live radio edit cancelled.');
-  }
-  const response = await fetch(path, {
-    ...options,
-    headers: {
-      ...(options.body ? { 'Content-Type': 'application/json' } : {}),
-      ...(stateful && state.activeTabId
-        ? { 'X-Chirp-Tab': state.activeTabId } : {}),
-      ...(liveMutation ? { 'X-Chirp-Confirm-Live': 'true' } : {}),
-      ...options.headers,
-    },
-  });
-  const body = await response.json().catch(() => ({}));
-  if (!response.ok) {
-    const detail = body.detail;
-    throw new Error(typeof detail === 'string' ? detail : JSON.stringify(detail || response.statusText));
-  }
-  return body;
 }
 
 function showNotice(message, isError = false) {
@@ -771,6 +545,8 @@ function updateBulkControls() {
   $('#clusterSelected').disabled = state.busy || !canArrange;
   $('#copySelected').disabled = state.busy || !canAct;
   $('#cutSelected').disabled = state.busy || !canAct;
+  $('#copyPortable').disabled = state.busy || !canAct;
+  $('#pastePortable').disabled = state.busy || !state.session;
   $('#compareSelectedTab').disabled = state.busy || !canAct ||
     !$('#compareOpenTab').value;
   $('#pasteSelected').disabled = state.busy || !state.session ||
@@ -794,6 +570,10 @@ function renderSession() {
     $('#memoryRows').innerHTML = '<tr class="empty-state"><td colspan="9">Your channel list will appear here after you open an image.</td></tr>';
     $('#pageLabel').textContent = '—';
     $('#exportCsv').disabled = true;
+    $('#copyPortable').disabled = true;
+    $('#pastePortable').disabled = true;
+    $('#viewTransferTrace').disabled = true;
+    $('#advancedDiagnostics').disabled = true;
     $('#subdeviceControls').hidden = true;
     $('#loadSettings').disabled = true;
     $('#applySettings').disabled = true;
@@ -806,6 +586,8 @@ function renderSession() {
   details.textContent = `${state.session.name} · ${state.session.filename}${state.session.is_live ? ' · Live edits apply immediately' : ''}${state.session.dirty ? ' · Unsaved changes' : ''}`;
   saveButton.disabled = state.busy || state.session.is_live;
   $('#exportCsv').disabled = state.busy;
+  $('#viewTransferTrace').disabled = state.busy;
+  $('#advancedDiagnostics').disabled = state.busy;
   const subdeviceControls = $('#subdeviceControls');
   const subdevices = state.session.subdevices || [];
   subdeviceControls.hidden = subdevices.length < 2;
@@ -859,25 +641,6 @@ async function updateHistory() {
   } catch (error) {
     showNotice(error.message, true);
   }
-}
-
-function formatFrequency(value) {
-  if (value === null || value === undefined || Number(value) === 0) return '—';
-  return (Number(value) / 1_000_000).toFixed(6);
-}
-
-function txFrequency(memory) {
-  if (memory.empty || !memory.freq) return null;
-  if (memory.duplex === 'split') return memory.offset;
-  if (memory.duplex === 'off') return null;
-  return (memory.freq || 0) +
-    (memory.offset || 0) * (memory.duplex === '-' ? -1 : 1);
-}
-
-function extraColumnValue(nodes = []) {
-  return nodes.flatMap((node) => node.type === 'group'
-    ? extraColumnValue(node.children)
-    : [`${node.label}: ${node.value ?? ''}`]).join('; ');
 }
 
 function renderMemories(memories) {
@@ -1567,11 +1330,57 @@ async function scopedDownload(path, payload, filename) {
   downloadBlob(filename, await response.blob());
 }
 
+async function scopedText(path, payload) {
+  const response = await fetch(path, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      ...(state.activeTabId ? { 'X-Chirp-Tab': state.activeTabId } : {}),
+    },
+    body: JSON.stringify(payload),
+  });
+  if (!response.ok) {
+    const body = await response.json().catch(() => ({}));
+    throw new Error(body.detail || response.statusText);
+  }
+  return response.text();
+}
+
 $('#exportCsv').addEventListener('click', async () => {
   try {
     await scopedDownload(
       '/api/session/export.csv', outputScopePayload(), 'channels.csv');
     showNotice('Channel list exported as CSV.');
+  } catch (error) {
+    showNotice(error.message, true);
+  }
+});
+
+$('#copyPortable').addEventListener('click', async () => {
+  try {
+    if (!navigator.clipboard?.writeText) {
+      throw new Error('This browser does not permit clipboard writing.');
+    }
+    const csv = await scopedText('/api/session/export.csv', {
+      scope: 'selected',
+      numbers: [...state.selected],
+    });
+    await navigator.clipboard.writeText(csv);
+    showNotice(`${state.selected.size} channel${state.selected.size === 1 ? '' : 's'} copied as CHIRP CSV.`);
+  } catch (error) {
+    showNotice(error.message, true);
+  }
+});
+
+$('#pastePortable').addEventListener('click', async () => {
+  try {
+    if (!navigator.clipboard?.readText) {
+      throw new Error('This browser does not permit clipboard reading.');
+    }
+    const text = (await navigator.clipboard.readText()).trim();
+    if (!text) throw new Error('The system clipboard is empty.');
+    await importChannelsFile(new File([tsvToCsv(text)], 'clipboard.csv',
+      { type: 'text/csv' }));
   } catch (error) {
     showNotice(error.message, true);
   }
@@ -1827,6 +1636,71 @@ $('#saveButton').addEventListener('click', async () => {
     showNotice(error.message, true);
   }
 });
+
+$('#viewTransferTrace').addEventListener('click', async () => {
+  try {
+    const trace = await api('/api/session/transfer-trace');
+    $('#transferTraceContent').textContent = trace.entries.length
+      ? trace.entries.join('\n')
+      : 'No serial transfer activity has been recorded for this image.';
+    $('#transferTraceDialog').showModal();
+  } catch (error) {
+    showNotice(error.message, true);
+  }
+});
+$('#closeTransferTrace').addEventListener('click', () =>
+  $('#transferTraceDialog').close());
+
+$('#advancedDiagnostics').addEventListener('click', async () => {
+  try {
+    const diagnostics = await api('/api/session/advanced-diagnostics');
+    $('#enableAdvancedDiagnostics').checked = diagnostics.enabled;
+    $('#rawMemoryContent').textContent = '';
+    $('#advancedDiagnosticsDialog').showModal();
+  } catch (error) {
+    showNotice(error.message, true);
+  }
+});
+$('#closeAdvancedDiagnostics').addEventListener('click', () =>
+  $('#advancedDiagnosticsDialog').close());
+$('#enableAdvancedDiagnostics').addEventListener('change', async (event) => {
+  try {
+    const result = await api('/api/session/advanced-diagnostics', {
+      method: 'PATCH',
+      body: JSON.stringify({ enabled: event.target.checked }),
+    });
+    event.target.checked = result.enabled;
+    $('#rawMemoryContent').textContent = result.enabled ? '' :
+      'Raw-memory inspection is disabled.';
+  } catch (error) {
+    event.target.checked = !event.target.checked;
+    showNotice(error.message, true);
+  }
+});
+
+async function inspectRawMemory(diff) {
+  const numbers = [...state.selected];
+  if (diff ? numbers.length !== 2 : numbers.length !== 1) {
+    showNotice(diff
+      ? 'Select exactly two channels to compare raw memory.'
+      : 'Select exactly one channel to view raw memory.', true);
+    return;
+  }
+  try {
+    const result = await api(diff ? '/api/memories/raw-diff' :
+      '/api/memories/raw', {
+      method: 'POST',
+      body: JSON.stringify({ numbers }),
+    });
+    $('#rawMemoryContent').textContent = diff ? result.diff :
+      result.memories[0].raw;
+  } catch (error) {
+    showNotice(error.message, true);
+  }
+}
+
+$('#viewRawMemory').addEventListener('click', () => inspectRawMemory(false));
+$('#diffRawMemory').addEventListener('click', () => inspectRawMemory(true));
 
 function showProgress(job) {
   $('#transferProgress').hidden = false;

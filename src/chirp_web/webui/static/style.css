@@ -185,6 +185,8 @@ footer { padding-top: 26px; color: #8a958d; text-align: center; font-size: 10px;
 .dialog-actions { display: flex; justify-content: end; gap: 8px; margin-top: 18px; }
 .radio-info-content { max-height: 60vh; overflow: auto; margin: 0; padding: 12px; border: 1px solid var(--line); border-radius: 8px; background: #fbfdfb; font: 11px/1.5 "DM Mono", monospace; white-space: pre-wrap; }
 .dialog-help { color: var(--muted); font-size: 12px; line-height: 1.5; }
+.advanced-toggle { display: flex; gap: 8px; align-items: start; color: #536158; font-size: 12px; }
+.advanced-toggle input { margin-top: 2px; accent-color: var(--green); }
 .report-files { display: grid; gap: 8px; max-height: 45vh; overflow-y: auto; }
 .report-files label { display: grid; grid-template-columns: auto 1fr; gap: 4px 9px; align-items: start; border: 1px solid var(--line); border-radius: 7px; padding: 10px; font-size: 12px; }
 .report-files input { grid-row: span 2; margin-top: 2px; accent-color: var(--green); }

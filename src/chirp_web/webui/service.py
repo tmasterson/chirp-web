@@ -21,26 +21,21 @@ import copy
 import contextvars
 import csv
 import io
-import json
 import logging
 import math
 import re
-import shutil
 import tempfile
 import threading
 import time
 import uuid
-import zipfile
-from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass, field
 from importlib import resources
 from pathlib import Path
 from typing import TypedDict
 
 from chirp_web import bandplan, chirp_common, directory, settings
+from chirp_web.webui.diagnostics import SessionDiagnostics
 
-import serial
-from serial.tools import list_ports
 
 LOG = logging.getLogger(__name__)
 MAX_IMAGE_SIZE = 20 * 1024 * 1024
@@ -138,6 +133,8 @@ class DriverSession:
         self.active_job = None
         self.backup_directory: Path | None = None
         self.backup_retention = 10
+        self.advanced_diagnostics = False
+        self._diagnostics = SessionDiagnostics(self, WebServiceError, LOG)
         self._new_tab()
 
     @property
@@ -747,205 +744,52 @@ class DriverSession:
             }
 
     def radio_info(self):
-        """Return safe, read-only identity and feature information."""
-        with self.lock:
-            radio = self._require_radio()
-            features = radio.get_features()
-            radio_class = getattr(radio, '_orig_rclass', radio.__class__)
-            metadata = {
-                str(key): str(value)
-                for key, value in getattr(radio, 'metadata', {}).items()
-                if key not in {'raw', 'mem_extra'}
-            }
-            return {
-                'name': radio.get_name(),
-                'driver': {
-                    'class': radio_class.__name__,
-                    'module': radio_class.__module__,
-                },
-                'image': {
-                    'filename': self.source_name,
-                    'metadata': metadata,
-                },
-                'features': {
-                    key: (
-                        [str(item) for item in getattr(features, key)]
-                        if isinstance(getattr(features, key), list)
-                        else str(getattr(features, key))
-                    )
-                    for key in features._valid_map
-                },
-            }
+        return self._diagnostics.radio_info()
+
+    def advanced_diagnostics_state(self):
+        return self._diagnostics.advanced_diagnostics_state()
+
+    def set_advanced_diagnostics(self, enabled):
+        return self._diagnostics.set_advanced_diagnostics(enabled)
+
+    def raw_memories(self, numbers):
+        return self._diagnostics.raw_memories(numbers)
+
+    def raw_memory_diff(self, numbers):
+        return self._diagnostics.raw_memory_diff(numbers)
+
+    def transfer_trace(self):
+        return self._diagnostics.transfer_trace()
 
     def create_backup(self, reason):
-        """Save a local, temporary pre-transfer copy of a clone image."""
-        with self.lock:
-            radio = self._tab.radio
-            if radio is None:
-                raise WebServiceError('Open a radio image before editing.', 409)
-            if not isinstance(radio, chirp_common.CloneModeRadio):
-                return None
-            suffix = Path(self.source_name).suffix or '.img'
-            handle = tempfile.NamedTemporaryFile(
-                    prefix=f'chirp-web-{reason}-', suffix=suffix,
-                    delete=False)
-            path = handle.name
-            handle.close()
-            try:
-                radio.save_mmap(path)
-            except Exception:
-                Path(path).unlink(missing_ok=True)
-                raise
-            tab = self._tab
-            tab.backup_paths.append(path)
-            for expired in tab.backup_paths[:-10]:
-                Path(expired).unlink(missing_ok=True)
-            del tab.backup_paths[:-10]
-            backup = {
-                'id': Path(path).name,
-                'reason': reason,
-                'created_at': int(time.time()),
-                'filename': self._safe_name(self.source_name),
-            }
-            if self.backup_directory is not None:
-                retained_name = (
-                    f'chirp-web-backup-{int(time.time())}-{uuid.uuid4().hex}-'
-                    f'{self._safe_name(self.source_name)}')
-                try:
-                    shutil.copyfile(path, self.backup_directory / retained_name)
-                    self._prune_retained_backups()
-                except OSError as exc:
-                    LOG.exception('Unable to retain backup in %s',
-                                  self.backup_directory)
-                    backup['retention_error'] = str(exc)
-            return backup
+        return self._diagnostics.create_backup(reason)
 
     def backups(self):
-        with self.lock:
-            return self._backup_entries()
+        return self._diagnostics.backups()
 
     def backup_path(self, backup_id):
-        with self.lock:
-            return str(self._backup_file(backup_id))
+        return self._diagnostics.backup_path(backup_id)
 
     def restore_backup(self, backup_id):
-        """Open a backup as an independent tab without replacing the current."""
-        with self.lock:
-            path = self._backup_file(backup_id)
-            data = base64.b64encode(path.read_bytes()).decode('ascii')
-            filename = path.name.split('-', 5)[-1]
-        return self.open_image(filename, data, confirm_replace=True)
+        return self._diagnostics.restore_backup(backup_id)
 
     def delete_backup(self, backup_id):
-        """Delete an explicitly selected retained backup."""
-        with self.lock:
-            path = self._backup_file(backup_id)
-            if path.parent != self.backup_directory:
-                raise WebServiceError(
-                        'Temporary backups expire with this tab and cannot '
-                        'be deleted individually.', 409)
-            try:
-                path.unlink()
-            except OSError as exc:
-                raise WebServiceError(
-                        'The retained backup could not be deleted.', 500) from exc
-            return {'deleted': backup_id}
+        return self._diagnostics.delete_backup(backup_id)
 
     def diagnostic_bundle(self):
-        """Build a local support archive without radio image contents."""
-        info = self.radio_info()
-        payload = json.dumps(info, indent=2, sort_keys=True).encode('utf-8')
-        output = io.BytesIO()
-        with zipfile.ZipFile(output, 'w', zipfile.ZIP_DEFLATED) as archive:
-            archive.writestr('radio-info.json', payload)
-            archive.writestr(
-                    'serial-trace.txt',
-                    '\n'.join(self._tab.serial_trace) + '\n')
-            archive.writestr(
-                    'README.txt',
-                    'This archive contains radio identity and capability '
-                    'metadata and a redacted serial activity trace. It does '
-                    'not include channel data, settings, serial payloads, '
-                    'or credentials.\n')
-        return output.getvalue()
+        return self._diagnostics.diagnostic_bundle()
 
     def report_manifest(self):
-        """List reviewable, privacy-preserving support-report attachments."""
-        with self.lock:
-            self._require_radio()
-            return {'files': [
-                {'id': 'radio-info', 'name': 'radio-info.json',
-                 'description': 'Driver, image, and supported-feature data.',
-                 'default': True},
-                {'id': 'serial-trace', 'name': 'serial-trace.txt',
-                 'description': 'Redacted transfer timing and byte counts.',
-                 'default': True},
-                {'id': 'backups', 'name': 'backup-list.json',
-                 'description': 'Names of available local backups, not their '
-                                'contents.',
-                 'default': False},
-            ]}
+        return self._diagnostics.report_manifest()
 
     def support_report(self, include):
-        """Build only the user-selected safe diagnostic files."""
-        allowed = {'radio-info', 'serial-trace', 'backups'}
-        requested = set(include)
-        if not requested or not requested <= allowed:
-            raise WebServiceError('Select one or more valid report files.',
-                                  422)
-        with self.lock:
-            self._require_radio()
-            output = io.BytesIO()
-            with zipfile.ZipFile(output, 'w', zipfile.ZIP_DEFLATED) as archive:
-                if 'radio-info' in requested:
-                    archive.writestr(
-                            'radio-info.json',
-                            json.dumps(self.radio_info(), indent=2,
-                                       sort_keys=True))
-                if 'serial-trace' in requested:
-                    archive.writestr(
-                            'serial-trace.txt',
-                            '\n'.join(self._tab.serial_trace) + '\n')
-                if 'backups' in requested:
-                    archive.writestr(
-                            'backup-list.json',
-                            json.dumps(self.backups(), indent=2))
-            return output.getvalue()
+        return self._diagnostics.support_report(include)
 
     def recovery_export(self):
-        """Serialize eligible tabs for explicit browser download."""
-        with self.lock:
-            self._ensure_idle()
-            original = self.active_tab_id
-            tabs = []
-            skipped = []
-            for tab_id, tab in self.tabs.items():
-                if tab.radio is None:
-                    continue
-                if isinstance(tab.radio, chirp_common.LiveRadio):
-                    skipped.append(tab.source_name)
-                    continue
-                self.active_tab_id = tab_id
-                snapshot = self.save_image(mark_clean=False)
-                tabs.append(snapshot)
-            self.active_tab_id = original
-            return {'tabs': tabs, 'skipped': skipped}
+        return self._diagnostics.recovery_export()
 
     def recovery_import(self, snapshots):
-        """Restore explicit browser-provided image snapshots as new tabs."""
-        if not snapshots:
-            raise WebServiceError('Recovery file contains no tabs.', 422)
-        opened = []
-        for snapshot in snapshots:
-            if not isinstance(snapshot, dict):
-                raise WebServiceError('Invalid recovery tab.', 422)
-            filename = snapshot.get('filename')
-            data = snapshot.get('data_base64')
-            if not isinstance(filename, str) or not isinstance(data, str):
-                raise WebServiceError('Invalid recovery tab.', 422)
-            opened.append(self.open_image(filename, data,
-                                          confirm_replace=True))
-        return {'opened': len(opened), 'active_tab_id': self.active_tab_id}
+        return self._diagnostics.recovery_import(snapshots)
 
     @staticmethod
     def _settings_tree(radio_settings):
@@ -2535,299 +2379,9 @@ class DriverSession:
             self.active_tab_id = None
 
 
-class TransferManager:
-    """Run blocking serial transfers off the web request thread."""
-
-    def __init__(self, session: DriverSession):
-        """Create a transfer queue for one active radio session."""
-        self.session = session
-        self.executor = ThreadPoolExecutor(
-                max_workers=1, thread_name_prefix='chirp-web-radio')
-        self.lock = threading.Lock()
-        self.jobs: dict[str, dict[str, object]] = {}
-
-    @staticmethod
-    def radios():
-        """Return clone-mode and live-mode radios that support serial I/O."""
-        directory.import_drivers()
-        result = []
-        for ident, radio_class in sorted(directory.DRV_TO_RADIO.items()):
-            if not issubclass(
-                    radio_class,
-                    (chirp_common.CloneModeRadio, chirp_common.LiveRadio)):
-                continue
-            result.append({
-                'id': ident,
-                'name': radio_class.get_name(),
-                'baud_rate': getattr(radio_class, 'BAUD_RATE', None),
-                'mode': ('live' if issubclass(
-                    radio_class, chirp_common.LiveRadio) else 'clone'),
-            })
-        return result
-
-    @staticmethod
-    def _prompts(radio_class, operation=None):
-        try:
-            prompts = radio_class.get_prompts()
-        except NameError as exc:
-            raise WebServiceError(
-                'This radio driver could not provide transfer instructions.',
-                500) from exc
-        keys = ('info', 'experimental', 'pre_download', 'pre_upload')
-        if operation == 'download':
-            keys = ('info', 'experimental', 'pre_download')
-        elif operation == 'upload':
-            keys = ('info', 'experimental', 'pre_upload')
-        return {
-            key: str(getattr(prompts, key, '') or '').strip()
-            for key in keys if getattr(prompts, key, '')
-        }
-
-    def prompts(self, radio_id):
-        """Return the selected driver's relevant user-facing instructions."""
-        try:
-            radio_class = directory.get_radio(radio_id)
-        except Exception as exc:
-            raise WebServiceError('Unknown radio model.', 404) from exc
-        return {'download': self._prompts(radio_class, 'download'),
-                'upload': self._prompts(radio_class, 'upload')}
-
-    def upload_prompts(self):
-        """Return prompt text for the image currently selected for upload."""
-        with self.session.lock:
-            radio = self.session._tab.radio
-            if radio is None:
-                raise WebServiceError('Open a radio image before editing.', 409)
-            return self._prompts(radio.__class__, 'upload')
-
-    @staticmethod
-    def ports():
-        """Return serial ports currently detected on this computer."""
-        return [{'port': item.device, 'description': item.description}
-                for item in list_ports.comports()]
-
-    @staticmethod
-    def valid_port(port):
-        """Permit detected ports and explicit local serial device names."""
-        if '\x00' in port or len(port) > 512:
-            return False
-        if port in {item['port'] for item in TransferManager.ports()}:
-            return True
-        return (port.startswith('/dev/') or
-                bool(re.fullmatch(r'COM[1-9][0-9]*', port, re.IGNORECASE)))
-
-    def start(self, operation: str, radio_id: str, port: str,
-              confirm: bool = False, confirm_replace: bool = False,
-              confirm_prompts: bool = False):
-        """Validate and queue one upload or download operation."""
-        with self.session.lock:
-            self.session._ensure_idle()
-            if operation == 'upload':
-                radio = self.session._tab.radio
-                if radio is None:
-                    raise WebServiceError(
-                            'Open a radio image before editing.', 409)
-                if not isinstance(radio, chirp_common.CloneModeRadio):
-                    raise WebServiceError(
-                            'Upload is available only for clone-mode images.',
-                            409)
-                if not confirm:
-                    raise WebServiceError(
-                            'Confirm that you want to write this image to the '
-                            'radio.', 400)
-                radio_class = radio.__class__
-            else:
-                try:
-                    radio_class = directory.get_radio(radio_id)
-                except Exception as exc:
-                    raise WebServiceError('Unknown radio model.', 404) from exc
-                if not issubclass(
-                        radio_class, (chirp_common.CloneModeRadio,
-                                      chirp_common.LiveRadio)):
-                    raise WebServiceError(
-                            'Radio model does not support serial transfers.',
-                            422)
-
-            if (self._prompts(radio_class, operation) and
-                    not confirm_prompts):
-                raise WebServiceError(
-                        'Review and confirm this radio’s transfer '
-                        'instructions before continuing.', 409)
-            if not self.valid_port(port):
-                raise WebServiceError(
-                        'Select a detected port or provide a local serial '
-                        'device path.',
-                        422)
-            job_id = str(uuid.uuid4())
-            job = {
-                'id': job_id,
-                'operation': operation,
-                'state': 'running',
-                'progress': 0,
-                'message': 'Starting transfer',
-                'error': None,
-                'cancelled': threading.Event(),
-                'pipe': None,
-            }
-            with self.lock:
-                self.jobs[job_id] = job
-            if operation == 'download':
-                self.session._new_tab()
-                job['tab_id'] = self.session.active_tab_id
-            self.session.active_job = job_id
-            self.executor.submit(
-                    self._run, job_id, radio_class, port, operation)
-            return self._public(job)
-
-    @staticmethod
-    def _public(job):
-        return {key: value for key, value in job.items()
-                if key not in {'cancelled', 'pipe'}}
-
-    def _set_progress(self, job_id: str, status):
-        with self.lock:
-            job = self.jobs[job_id]
-            if job['cancelled'].is_set():
-                return
-            maximum = status.max or 1
-            job['progress'] = max(0, min(100, int(status.cur * 100 / maximum)))
-            job['message'] = str(status.msg)
-
-    def _run(self, job_id: str, radio_class, port: str, operation: str):
-        pipe = None
-        temp_path = None
-        failure = None
-        try:
-            with self.lock:
-                job = self.jobs[job_id]
-            if job['cancelled'].is_set():
-                raise WebServiceError('Transfer was cancelled.', 409)
-            raw_pipe = serial.Serial(port=port, timeout=0.5)
-            with self.session.lock:
-                pipe = RedactedSerialTrace(
-                        raw_pipe, self.session._tab.serial_trace)
-            with self.lock:
-                self.jobs[job_id]['pipe'] = pipe
-            if job['cancelled'].is_set():
-                raise WebServiceError('Transfer was cancelled.', 409)
-            detected = getattr(radio_class, 'detect_from_serial', None)
-            if operation == 'download' and callable(detected):
-                try:
-                    detected_class = detected(pipe)
-                    if (isinstance(detected_class, type) and
-                            issubclass(detected_class, radio_class)):
-                        radio_class = detected_class
-                except Exception:
-                    LOG.info('Radio model detection was unavailable',
-                             exc_info=True)
-            if operation == 'download':
-                radio = radio_class(pipe)
-            else:
-                with self.session.lock:
-                    radio = self.session._tab.radio
-                    if radio is None:
-                        raise WebServiceError(
-                                'Open a radio image before editing.', 409)
-                    radio.set_pipe(pipe)
-            radio.status_fn = lambda status: self._set_progress(
-                    job_id, status)
-            if operation == 'download':
-                if isinstance(radio, chirp_common.LiveRadio):
-                    with self.session.lock:
-                        self.session._replace_radio(
-                                radio, f'{radio_class.get_name()} (live)',
-                                None)
-                        self.session._tab.live_port = pipe
-                    pipe = None
-                else:
-                    radio.sync_in()
-                    handle = tempfile.NamedTemporaryFile(
-                            prefix='chirp-web-download-',
-                            suffix='.img',
-                            delete=False)
-                    temp_path = handle.name
-                    handle.close()
-                    radio.save_mmap(temp_path)
-                    with self.session.lock:
-                        self.session._replace_radio(
-                                radio, f'{radio_class.get_name()}.img',
-                                temp_path)
-                        temp_path = None
-                        try:
-                            self.session.create_backup('download')
-                        except Exception:
-                            LOG.exception('Unable to create download backup')
-            else:
-                with self.session.lock:
-                    try:
-                        self.session.create_backup('upload')
-                    except Exception:
-                        LOG.exception('Unable to create upload backup')
-                radio.sync_out()
-                with self.session.lock:
-                    self.session.dirty = False
-        except Exception as exc:
-            failure = exc
-            if not (isinstance(exc, WebServiceError) and
-                    exc.status_code == 409):
-                LOG.exception('Radio %s failed', operation)
-        finally:
-            try:
-                if pipe is not None and pipe.is_open:
-                    pipe.close()
-            except Exception as exc:
-                LOG.exception(
-                        'Unable to close serial port after %s', operation)
-                if failure is None:
-                    failure = exc
-            if temp_path:
-                Path(temp_path).unlink(missing_ok=True)
-            with self.session.lock:
-                if self.session.active_job == job_id:
-                    self.session.active_job = None
-                with self.lock:
-                    cancelled = self.jobs[job_id]['cancelled'].is_set()
-                    self.jobs[job_id]['pipe'] = None
-                    if cancelled:
-                        self.jobs[job_id].update(
-                                state='cancelled', message='Transfer cancelled',
-                                error=None)
-                    elif failure is None:
-                        self.jobs[job_id].update(
-                                state='complete', progress=100,
-                                message='Transfer done')
-                    else:
-                        self.jobs[job_id].update(
-                                state='failed', error=str(failure),
-                                message='Transfer failed')
-
-    def get(self, job_id: str):
-        """Return progress for one transfer job."""
-        with self.lock:
-            job = self.jobs.get(job_id)
-            if job is None:
-                raise WebServiceError('Transfer job was not found.', 404)
-            return self._public(job)
-
-    def cancel(self, job_id: str):
-        """Request cancellation by closing the active serial connection."""
-        with self.lock:
-            job = self.jobs.get(job_id)
-            if job is None:
-                raise WebServiceError('Transfer job was not found.', 404)
-            if job['state'] != 'running':
-                return self._public(job)
-            job['cancelled'].set()
-            job['message'] = 'Cancelling transfer'
-            pipe = job.get('pipe')
-        if pipe is not None:
-            try:
-                pipe.close()
-            except Exception:
-                LOG.exception('Unable to close serial port for cancellation')
-        return self._public(job)
-
-    def close(self):
-        """Stop accepting transfers and release session resources."""
-        self.executor.shutdown(wait=False, cancel_futures=True)
-        self.session.close()
+def __getattr__(name):
+    """Preserve deferred compatibility exports after service extraction."""
+    if name in {'TransferManager', 'serial'}:
+        from chirp_web.webui import transfers
+        return getattr(transfers, name)
+    raise AttributeError(name)

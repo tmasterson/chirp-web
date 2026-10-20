@@ -16,15 +16,12 @@
 # along with this program.  If not, see <http://www.gnu.org/licenses/>.
 
 import logging
-import json
 import math
-import platform
 import threading
 import time
 import uuid
 from concurrent.futures import ThreadPoolExecutor
 from contextlib import asynccontextmanager
-from importlib import metadata
 from pathlib import Path
 from typing import Callable, Protocol, TypedDict, cast
 from urllib.parse import urlsplit
@@ -42,12 +39,12 @@ from chirp_web.sources import (
 from chirp_web.webui.service import (
         DriverSession,
         MAX_IMAGE_SIZE,
-        TransferManager,
         WebServiceError,
 )
+from chirp_web.webui.transfers import TransferManager
 
-from fastapi import FastAPI, Query
-from fastapi.responses import FileResponse, JSONResponse, Response
+from fastapi import FastAPI
+from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 
 from pydantic import (
@@ -161,6 +158,18 @@ class MemoryPaste(StrictModel):
     clipboard_id: StrictStr = Field(min_length=1, max_length=64)
     start: StrictInt = Field(ge=0)
     overwrite: bool = False
+
+
+class AdvancedDiagnosticsUpdate(StrictModel):
+    """Explicit local opt-in for read-only driver internals."""
+
+    enabled: StrictBool
+
+
+class RawMemoryRequest(StrictModel):
+    """One or two channel identifiers for advanced inspection."""
+
+    numbers: list[StrictInt | StrictStr] = Field(min_length=1, max_length=2)
 
 
 class MemoryBulkUpdate(StrictModel):
@@ -789,482 +798,13 @@ def create_app() -> FastAPI:
 
     app.mount('/static', StaticFiles(directory=STATIC_DIR), name='static')
 
-    @app.get('/api/radios')
-    def list_radios():
-        return transfers.radios()
-
-    @app.get('/api/radios/{radio_id}/prompts')
-    def radio_prompts(radio_id: str):
-        return transfers.prompts(radio_id)
-
-    @app.get('/api/transfers/prompts/upload')
-    def upload_prompts():
-        return transfers.upload_prompts()
-
-    @app.get('/api/ports')
-    def list_ports():
-        return transfers.ports()
-
-    @app.get('/api/ports/baseline')
-    def port_baseline():
-        return {'ports': transfers.ports()}
-
-    @app.get('/api/ports/detect')
-    def detect_ports(baseline: str = Query(default='', max_length=8192)):
-        try:
-            previous = json.loads(baseline) if baseline else []
-        except json.JSONDecodeError as exc:
-            raise WebServiceError('Port baseline must be valid JSON.', 422) from exc
-        if not isinstance(previous, list) or not all(
-                isinstance(item, str) for item in previous):
-            raise WebServiceError('Port baseline must be a list of paths.',
-                                  422)
-        ports = transfers.ports()
-        known = set(previous)
-        return {'ports': ports,
-                'detected': [item for item in ports
-                             if item['port'] not in known]}
-
-    @app.get('/api/about')
-    def about():
-        try:
-            version = metadata.version('chirp-web')
-        except metadata.PackageNotFoundError:
-            version = 'development'
-        return {
-            'version': version,
-            'python': platform.python_version(),
-            'platform': platform.platform(),
-            'release_url': 'https://github.com/tmasterson/chirp-web/releases',
-        }
-
-    @app.get('/api/session')
-    def get_session():
-        return session.describe()
-
-    @app.post('/api/session/close')
-    def close_session():
-        return session.close_tab()
-
-    @app.get('/api/session/tabs')
-    def get_tabs():
-        return session.tabs_summary()
-
-    @app.post('/api/session/tabs/{tab_id}/activate')
-    def activate_tab(tab_id: str):
-        return session.activate_tab(tab_id)
-
-    @app.put('/api/session/tabs')
-    def reorder_tabs(payload: TabOrder):
-        return session.reorder_tabs(payload.tab_ids)
-
-    @app.post('/api/session/subdevices/{index}')
-    def select_subdevice(index: int):
-        return session.select_subdevice(index)
-
-    @app.get('/api/session/info')
-    def get_radio_info():
-        return session.radio_info()
-
-    @app.get('/api/session/backups')
-    def get_backups():
-        return {'backups': session.backups()}
-
-    @app.get('/api/session/backups/settings')
-    def get_backup_settings():
-        return session.backup_settings()
-
-    @app.put('/api/session/backups/settings')
-    def set_backup_settings(payload: BackupStorageSettings):
-        return session.configure_backup_storage(
-                payload.directory, payload.retention)
-
-    @app.get('/api/session/backups/{backup_id}')
-    def download_backup(backup_id: str):
-        return FileResponse(
-                session.backup_path(backup_id),
-                filename=f'{backup_id}.img',
-                media_type='application/octet-stream')
-
-    @app.post('/api/session/backups/{backup_id}/restore')
-    def restore_backup(backup_id: str):
-        return session.restore_backup(backup_id)
-
-    @app.delete('/api/session/backups/{backup_id}')
-    def delete_backup(backup_id: str):
-        return session.delete_backup(backup_id)
-
-    @app.get('/api/session/diagnostics')
-    def download_diagnostics():
-        return Response(
-                session.diagnostic_bundle(),
-                media_type='application/zip',
-                headers={'Content-Disposition':
-                         'attachment; filename="chirp-web-diagnostics.zip"'})
-
-    @app.get('/api/session/report-manifest')
-    def get_report_manifest():
-        return session.report_manifest()
-
-    @app.post('/api/session/report')
-    def download_support_report(payload: SupportReportRequest):
-        return Response(
-                session.support_report(payload.include),
-                media_type='application/zip',
-                headers={'Content-Disposition':
-                         'attachment; filename="chirp-web-support.zip"'})
-
-    @app.post('/api/session/recovery/export')
-    def export_recovery():
-        return session.recovery_export()
-
-    @app.post('/api/session/recovery/import')
-    def import_recovery(payload: RecoveryImport):
-        return session.recovery_import(payload.tabs)
-
-    @app.get('/api/configurations')
-    def list_configurations():
-        return session.configurations()
-
-    @app.post('/api/session/new')
-    def new_configuration(payload: NewConfiguration):
-        return session.new_configuration(
-                payload.template_id, payload.confirm_replace)
-
-    @app.get('/api/session/history')
-    def get_history():
-        return session.history()
-
-    @app.post('/api/session/undo')
-    def undo():
-        return session.undo()
-
-    @app.post('/api/session/redo')
-    def redo():
-        return session.redo()
-
-    @app.get('/api/bandplans')
-    def get_bandplans():
-        return session.bandplans()
-
-    @app.patch('/api/bandplans')
-    def set_bandplan(payload: BandplanUpdate):
-        return session.set_bandplan(payload.name)
-
-    @app.post('/api/bandplans/defaults')
-    def get_frequency_defaults(payload: FrequencyDefaultsRequest):
-        return session.frequency_defaults(payload.frequency)
-
-    @app.get('/api/sources')
-    def list_sources():
-        return [
-            {
-                'id': source_id,
-                'name': source['name'],
-                'example': source['example'],
-                'help': source['help'],
-                'fields': source.get('fields', []),
-            }
-            for source_id, source in SOURCE_CATALOG.items()
-        ]
-
-    @app.post('/api/sources/{source_id}/query')
-    def query_source(source_id: str, payload: SourceQuery):
-        source = SOURCE_CATALOG.get(source_id)
-        if source is None:
-            raise WebServiceError('Unknown repeater source.', 404)
-        _validate_source_params(payload.params)
-        required = {
-            'dmrmarc': ('city', 'state', 'country'),
-            'radioreference': (
-                'username', 'password', 'country', 'zipcounty'),
-            'repeaterbook': ('country', 'service'),
-        }.get(source_id, ())
-        missing = [field for field in required if field not in payload.params]
-        if missing:
-            raise WebServiceError(
-                    'Missing source search parameters: ' +
-                    ', '.join(missing), 422)
-        if any(not isinstance(payload.params[field], str)
-               for field in required):
-            raise WebServiceError(
-                    'Required source search parameters must be text.', 422)
-        if (source_id == 'radioreference' and
-                payload.params['country'] not in ('US', 'CA')):
-            raise WebServiceError(
-                    'RadioReference country must be US or CA.', 422)
-        params = dict(payload.params)
-        return source_queries.start(
-                source_id, source, params, session.active_tab_id)
-
-    @app.get('/api/sources/jobs/{job_id}')
-    def source_query_status(job_id: str):
-        return source_queries.get(job_id)
-
-    @app.delete('/api/sources/jobs/{job_id}')
-    def cancel_source_query(job_id: str):
-        return source_queries.cancel(job_id)
-
-    @app.get('/api/sources/history')
-    def source_history():
-        return source_queries.history_summary()
-
-    @app.post('/api/sources/history/{history_id}/retry')
-    def retry_source_query(history_id: str):
-        return source_queries.retry(
-                history_id, SOURCE_CATALOG, session.active_tab_id)
-
-    @app.post('/api/sources/import')
-    def import_source_results(payload: SourceImport):
-        try:
-            return session.import_source_results(
-                    payload.query_id, payload.selected)
-        except WebServiceError as exc:
-            if exc.status_code != 404:
-                raise
-            return source_queries.import_results(
-                    payload.query_id, payload.selected)
-
-    @app.post('/api/session/compare')
-    def compare_image(payload: ImportImageRequest):
-        try:
-            return session.preview_image_memories(
-                    payload.filename, payload.data_base64)
-        except WebServiceError:
-            raise
-        except Exception as exc:
-            LOG.exception('Unable to read source image for comparison')
-            raise WebServiceError(
-                    'The selected file could not be read as a radio image.',
-                    422) from exc
-
-    @app.post('/api/session/compare-tab')
-    def compare_tab_memories(payload: TabMemoryCompare):
-        numbers = [
-            int(number) if isinstance(number, str) and number.isdecimal()
-            else number for number in payload.numbers
-        ]
-        return session.compare_tab_memories(payload.tab_id, numbers)
-
-    @app.post('/api/session/open')
-    def open_image(payload: OpenImageRequest):
-        try:
-            return session.open_image(
-                    payload.filename,
-                    payload.data_base64,
-                    confirm_replace=payload.confirm_replace)
-        except WebServiceError:
-            raise
-        except Exception as exc:
-            LOG.exception('Unable to open uploaded radio image')
-            raise WebServiceError(
-                    'The selected file could not be opened by a supported '
-                    'radio driver.', 422) from exc
-
-    @app.get('/api/memories')
-    def list_memories(start: int | None = Query(default=None, ge=0),
-                      limit: int = Query(default=50, ge=1, le=200),
-                      search: str = Query(default='', max_length=200),
-                      sort: str = Query(
-                          default='number',
-                          pattern='^(number|name|freq|mode|duplex)$'),
-                      direction: str = Query(
-                          default='asc', pattern='^(asc|desc)$'),
-                      hide_empty: bool = False):
-        details = session.describe()
-        low, high = details['memory_bounds']
-        filtered = bool(search or sort != 'number' or direction != 'asc' or
-                        hide_empty)
-        return session.memories(
-                (0 if filtered else low) if start is None else start,
-                limit, search, sort, direction, hide_empty)
-
-    @app.post('/api/memories/query')
-    def query_memories(payload: MemoryQuery):
-        return session.memories(
-                payload.start, payload.limit, sort=payload.sort,
-                direction=payload.direction, hide_empty=payload.hide_empty,
-                filters=[item.model_dump() for item in payload.filters],
-                match=payload.match)
-
-    @app.post('/api/memories/delete')
-    def delete_memories(payload: MemoryDelete):
-        numbers = [
-            int(number) if isinstance(number, str) and number.isdecimal()
-            else number for number in payload.numbers
-        ]
-        return session.delete_memories(numbers, payload.shift)
-
-    @app.post('/api/memories/move')
-    def move_memories(payload: MemoryMove):
-        return session.move_memories(payload.numbers, payload.direction)
-
-    @app.post('/api/memories/insert')
-    def insert_memory(payload: MemoryInsert):
-        return session.insert_memory_row(payload.number)
-
-    @app.post('/api/memories/copy')
-    def copy_memories(payload: MemoryCopy):
-        numbers = [
-            int(number) if isinstance(number, str) and number.isdecimal()
-            else number for number in payload.numbers
-        ]
-        return session.copy_memories(numbers, cut=payload.cut)
-
-    @app.post('/api/memories/paste')
-    def paste_memories(payload: MemoryPaste):
-        return session.paste_memories(
-                payload.clipboard_id, payload.start, payload.overwrite)
-
-    @app.patch('/api/memories/bulk')
-    def bulk_update_memories(payload: MemoryBulkUpdate):
-        numbers = [
-            int(number) if isinstance(number, str) and number.isdecimal()
-            else number for number in payload.numbers
-        ]
-        changes = payload.changes.model_dump(exclude_unset=True)
-        extra_changes = changes.pop('extra_changes', None)
-        if any(value is None for value in changes.values()):
-            raise WebServiceError(
-                    'Memory field values cannot be null.', 422)
-        if extra_changes is None and not changes:
-            raise WebServiceError('Provide at least one memory field.', 422)
-        return session.bulk_update_memories(
-                numbers, changes, extra_changes)
-
-    @app.post('/api/memories/arrange')
-    def arrange_memories(payload: MemoryArrange):
-        return session.arrange_memories(
-                payload.numbers, payload.operation,
-                payload.field, payload.direction)
-
-    @app.patch('/api/memories/{number}')
-    def update_memory(number: str, payload: MemoryUpdate):
-        number = int(number) if number.isdecimal() else number
-        values = payload.model_dump(exclude_unset=True)
-        extra_changes = values.pop('extra_changes', None)
-        if any(value is None for value in values.values()):
-            raise WebServiceError(
-                    'Memory field values cannot be null.', 422)
-        if extra_changes is None and not values:
-            raise WebServiceError('Provide at least one memory field.', 422)
-        return session.update_memory(number, values, extra_changes)
-
-    @app.get('/api/banks')
-    def list_banks():
-        return session.bank_models()
-
-    @app.patch('/api/memories/{number}/banks')
-    def update_memory_bank_membership(
-            number: str, payload: BankMembershipRequest):
-        number = int(number) if number.isdecimal() else number
-        return session.update_memory_bank_membership(
-                number,
-                payload.model,
-                payload.bank_index,
-                payload.enabled,
-        )
-
-    @app.patch('/api/banks')
-    def update_bank(payload: BankUpdate):
-        return session.update_bank(
-                payload.model, payload.bank_index, payload.name,
-                payload.memory_number, payload.index)
-
-    @app.get('/api/settings')
-    def get_settings():
-        return session.radio_settings()
-
-    @app.patch('/api/settings')
-    def update_settings(payload: SettingsUpdate):
-        return session.update_settings(
-                [change.model_dump() for change in payload.changes],
-                confirm_warnings=payload.confirm_warnings)
-
-    @app.post('/api/session/save')
-    def save_image(preserve_dirty: bool = False):
-        try:
-            return session.save_image(mark_clean=not preserve_dirty)
-        except WebServiceError:
-            raise
-        except Exception as exc:
-            LOG.exception('Unable to save radio image')
-            raise WebServiceError(
-                    'The radio driver could not save this image.',
-                    500) from exc
-
-    @app.get('/api/session/export.csv')
-    def export_csv():
-        return Response(
-                session.export_csv(),
-                media_type='text/csv',
-                headers={'Content-Disposition':
-                         'attachment; filename="channels.csv"'})
-
-    @app.post('/api/session/export.csv')
-    def export_scoped_csv(payload: MemoryScope):
-        numbers = [
-            int(number) if isinstance(number, str) and number.isdecimal()
-            else number for number in payload.numbers
-        ]
-        return Response(
-                session.export_csv(
-                    payload.scope, numbers,
-                    [item.model_dump() for item in payload.filters],
-                    payload.match, payload.search, payload.sort,
-                    payload.direction, payload.hide_empty),
-                media_type='text/csv',
-                headers={'Content-Disposition':
-                         'attachment; filename="channels.csv"'})
-
-    @app.post('/api/session/print')
-    def print_memories(payload: MemoryScope):
-        numbers = [
-            int(number) if isinstance(number, str) and number.isdecimal()
-            else number for number in payload.numbers
-        ]
-        return session.print_rows(
-                payload.scope, numbers,
-                [item.model_dump() for item in payload.filters],
-                payload.match, payload.search, payload.sort,
-                payload.direction, payload.hide_empty)
-
-    @app.post('/api/session/import')
-    def import_image(payload: ImportImageRequest):
-        try:
-            return session.import_image_memories(
-                    payload.filename, payload.data_base64,
-                    payload.placement, payload.destination_start)
-        except WebServiceError:
-            raise
-        except Exception as exc:
-            LOG.exception('Unable to merge memories from uploaded image')
-            raise WebServiceError(
-                    'The selected file could not be read as a radio image.',
-                    422) from exc
-
-    @app.post('/api/transfers/download')
-    def download_radio(payload: DownloadRequest):
-        return transfers.start(
-                'download',
-                payload.radio_id,
-                payload.port,
-                confirm_replace=payload.confirm_replace,
-                confirm_prompts=payload.confirm_prompts)
-
-    @app.post('/api/transfers/upload')
-    def upload_radio(payload: UploadRequest):
-        return transfers.start(
-                'upload', '', payload.port, confirm=payload.confirm,
-                confirm_prompts=payload.confirm_prompts)
-
-    @app.get('/api/transfers/{job_id}')
-    def transfer_status(job_id: str):
-        return transfers.get(job_id)
-
-    @app.delete('/api/transfers/{job_id}')
-    def cancel_transfer(job_id: str):
-        return transfers.cancel(job_id)
+    from chirp_web.webui.data_routes import register_data_routes
+    from chirp_web.webui.session_routes import register_session_routes
+
+    register_session_routes(
+            app, session, transfers, source_queries, SOURCE_CATALOG,
+            _validate_source_params, LOG)
+    register_data_routes(app, session, transfers, LOG)
 
     return app
 

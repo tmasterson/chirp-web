@@ -15,12 +15,14 @@
 # along with this program.  If not, see <http://www.gnu.org/licenses/>.
 
 import collections
+import abc
 import itertools
 import logging
 import struct
 import time
 
 from chirp_web import chirp_common, directory, memmap, errors, util, bitwise
+from chirp_web import checksum
 from chirp_web.settings import RadioSettingGroup, RadioSetting, \
     RadioSettingValueBoolean, RadioSettingValueList, \
     RadioSettingValueString, RadioSettingValueInteger, \
@@ -54,6 +56,25 @@ LOG = logging.getLogger(__name__)
 #   Scan Information, DTMF
 #
 #
+
+
+def choose_step(step_map, freq, default=5.0):
+    """Choose the proper step index for a given frequency.
+
+    @step_map should be a dict of step (in kHz) to index, in order of
+              preference.
+    @freq should be a frequency in Hz.
+    Returns the step index from step_map to use.
+    """
+    try:
+        step = chirp_common.required_step(freq, step_map.keys())
+    except errors.InvalidDataError:
+        step = default
+        LOG.warning('Frequency %s requires step not in available map, '
+                    'using %s kHz by default',
+                    chirp_common.format_freq(freq), step)
+    return step_map[step]
+
 
 CONVENTIONAL_DEFS = """
 struct conv_settings {
@@ -606,14 +627,6 @@ def _close_radio(radio):
         LOG.error('Failed to close radio: %s' % e)
 
 
-def _checksum(data):
-    """the radio block checksum algorithm"""
-    cs = 0
-    for byte in data:
-        cs += byte
-    return cs % 256
-
-
 def _make_frame(cmd, addr):
     """Pack the info in the format it likes"""
     return struct.pack(">BH", cmd[0], addr)
@@ -645,6 +658,8 @@ def _open_radio(radio, status):
         else:
             break
 
+    if not ack:
+        raise errors.RadioNoResponse()
     if ack != ACK_CMD:
         raise errors.RadioError('Failed to put radio into programming mode')
 
@@ -700,10 +715,10 @@ def read_block(pipe):
         block = b'\xFF' * BLOCK_SIZE
     else:
         block = pipe.read(BLOCK_SIZE)
-    checksum = pipe.read(1)
-    calc = _checksum(block)
-    if calc != checksum[0] and cmd != b'Z':
-        LOG.debug('Checksum %i does not match %i', calc, checksum[0])
+    cs = pipe.read(1)
+    calc = checksum.checksum_8bit(block)
+    if calc != cs[0] and cmd != b'Z':
+        LOG.debug('Checksum %i does not match %i', calc, cs[0])
         raise errors.RadioError('Checksum reading block from radio')
     exchange_ack(pipe)
     return block
@@ -715,7 +730,7 @@ def do_download(radio):
     status.max = MEM_SIZE // BLOCK_SIZE
     radio.status_fn(status)
 
-    data = bytearray()
+    data = b""
     count = 0
     _open_radio(radio, status)
 
@@ -723,12 +738,12 @@ def do_download(radio):
     for addr in MEM_BLOCKS:
         radio.pipe.write(_make_frame(b"R", addr))
         block = read_block(radio.pipe)
-        data.extend(block)
+        data += block
         status.cur = count
         radio.status_fn(status)
         count += 1
 
-    return memmap.MemoryMapBytes(bytes(data))
+    return memmap.MemoryMapBytes(data)
 
 
 def do_upload(radio):
@@ -750,7 +765,7 @@ def do_upload(radio):
         if data == EMPTY_BLOCK:
             frame = _make_frame(b'Z', block) + b'\xFF'
         else:
-            cs = _checksum(data)
+            cs = checksum.checksum_8bit(data)
             frame = _make_frame(b'W', block) + data + bytes([cs])
         radio.pipe.write(frame)
         try:
@@ -762,10 +777,10 @@ def do_upload(radio):
         radio.status_fn(status)
 
 
-class TKx80SubdevMeta(type):
+class TKx80SubdevMeta(abc.ABCMeta):
     """Metaclass for generating subdevice subclasses"""
-    def __new__(cls, name, parent, dct):
-        return super(TKx80SubdevMeta, cls).__new__(cls, name, (parent,), dct)
+    def __new__(cls, name, bases, dct):
+        return super(TKx80SubdevMeta, cls).__new__(cls, name, bases, dct)
 
     @staticmethod
     def make_subdev(parent_dev, child_cls, key, to_copy, **args):
@@ -776,7 +791,7 @@ class TKx80SubdevMeta(type):
            args: Class variables to set on the new class
         """
         return TKx80SubdevMeta('%s_%s' % (child_cls.__name__, key),
-                               child_cls,
+                               (child_cls, parent_dev.__class__),
                                dict({k: getattr(parent_dev, k)
                                      for k in to_copy}, **args))
 
@@ -787,15 +802,15 @@ class KenwoodTKx80(chirp_common.CloneModeRadio):
     BAUD_RATE = 9600
     _memsize = MEM_SIZE
     NAME_LENGTH = 8
-    _range: list[tuple[int, int]] = []
+    _range = []
     _upper = 250
-    _steps: tuple[float, ...] = chirp_common.COMMON_TUNING_STEPS
+    _steps = chirp_common.COMMON_TUNING_STEPS
     # Ver1 and Ver2 radios use a different multiplier for in-memory frequency
     _freqmult = 10
     VARIANT = ""
     MODEL = ""
     FORMATS = [directory.register_format('Kenwood KPG-49D', '.dat')]
-    POWER_LEVELS: list[chirp_common.PowerLevel] = []
+    POWER_LEVELS = []
 
     def load_mmap(self, filename):
         if filename.lower().endswith('.dat'):
@@ -870,10 +885,11 @@ class KenwoodTKx80(chirp_common.CloneModeRadio):
         return rf
 
     def get_sub_devices(self):
-        if not self._memobj:
-            return [TKx80Group(self, 1)]
         to_copy = ('MODEL', 'TYPE', 'POWER_LEVELS', '_range', '_steps',
                    '_freqmult')
+        if not self._memobj:
+            return [TKx80SubdevMeta.make_subdev(
+                self, TKx80Group, 1, to_copy)(self, 1)]
         return sorted([
             TKx80SubdevMeta.make_subdev(
                 self, TKx80Group, i,
@@ -1652,23 +1668,13 @@ class KenwoodTKx80(chirp_common.CloneModeRadio):
             _mem.txfreq = mem.freq // self._freqmult
 
         step_lookup = {
-            2.5: 0x0,
-            6.25: 0x2,
             12.5: 0x5,
+            6.25: 0x2,
             5.0: 0x1,
+            2.5: 0x0,
         }
-        try:
-            _mem.rx_step = step_lookup[chirp_common.required_step(
-                int(_mem.rxfreq) * 10)]
-        except errors.InvalidDataError:
-            LOG.warning('Unknown step for rx freq, defaulting to 5kHz')
-            _mem.rx_step = 0x1
-        try:
-            _mem.tx_step = step_lookup[chirp_common.required_step(
-                int(_mem.txfreq) * 10)]
-        except errors.InvalidDataError:
-            LOG.warning('Unknown step for tx freq, defaulting to 5kHz')
-            _mem.tx_step = 0x1
+        _mem.rx_step = choose_step(step_lookup, int(_mem.rxfreq) * 10)
+        _mem.tx_step = choose_step(step_lookup, int(_mem.txfreq) * 10)
 
         ((txmode, txtone, txpol), (rxmode, rxtone, rxpol)) = \
             chirp_common.split_tone_encode(mem)
@@ -1685,7 +1691,7 @@ class KenwoodTKx80(chirp_common.CloneModeRadio):
                 _mem.power = self.POWER_LEVELS[0]
 
 
-class TKx80Group(KenwoodTKx80):
+class TKx80Group:
     def __init__(self, parent, group):
         self._parent = parent
         self._group = int(group)
