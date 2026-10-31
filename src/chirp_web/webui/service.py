@@ -123,7 +123,7 @@ class SessionTab:
 class DriverSession:
     """Own local radio/image tabs edited by this app process."""
 
-    def __init__(self):
+    def __init__(self) -> None:
         """Initialize the server-owned image tabs."""
         self.lock = threading.RLock()
         self.tabs: dict[str, SessionTab] = {}
@@ -214,7 +214,8 @@ class DriverSession:
     def reorder_tabs(self, tab_ids):
         """Persist a user-requested image-tab order without changing state."""
         with self.lock:
-            if len(tab_ids) != len(self.tabs) or set(tab_ids) != set(self.tabs):
+            if (len(tab_ids) != len(self.tabs) or
+                set(tab_ids) != set(self.tabs)):
                 raise WebServiceError('The requested tab order is invalid.',
                                       422)
             self.tabs = {tab_id: self.tabs[tab_id] for tab_id in tab_ids}
@@ -250,8 +251,9 @@ class DriverSession:
             if not radios:
                 raise WebServiceError('Open a radio image first.', 409)
             if not 0 <= index < len(radios):
-                raise WebServiceError('The selected radio module was not found.',
-                                      404)
+                raise WebServiceError(
+                        'The selected radio module was not found.',
+                        404)
             self._tab.subdevice_index = index
             return self.describe()
 
@@ -529,7 +531,8 @@ class DriverSession:
                     key=lambda path: path.stat().st_mtime)
         except OSError as exc:
             raise WebServiceError(
-                    'The retained backup directory is unavailable.', 500) from exc
+                    'The retained backup directory is unavailable.',
+                    500) from exc
 
     def _prune_retained_backups(self):
         paths = self._retained_backup_paths()
@@ -554,7 +557,8 @@ class DriverSession:
             'created_at': int(path.stat().st_mtime),
             'persistent': True,
         } for path in self._retained_backup_paths()]
-        return sorted(temporary + retained, key=lambda item: item['created_at'])
+        return sorted(
+                temporary + retained, key=lambda item: item['created_at'])
 
     def _backup_file(self, backup_id):
         if not re.fullmatch(r'[A-Za-z0-9._ -]{1,255}', backup_id):

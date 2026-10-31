@@ -291,7 +291,7 @@ class MemoryScope(StrictModel):
 
     scope: str = Field(pattern='^(all|selected|filtered)$')
     numbers: list[StrictInt | StrictStr] = Field(default_factory=list,
-                                                   max_length=1000)
+                                                 max_length=1000)
     filters: list[MemoryFilter] = Field(default_factory=list, max_length=12)
     match: str = Field(default='all', pattern='^(all|any)$')
     search: str = Field(default='', max_length=200)
@@ -318,7 +318,7 @@ class RecoveryImport(StrictModel):
     """Explicit browser-provided image snapshots for recovery."""
 
     tabs: list[dict[StrictStr, StrictStr]] = Field(min_length=1,
-                                                     max_length=16)
+                                                   max_length=16)
 
 
 class SourceQuery(StrictModel):

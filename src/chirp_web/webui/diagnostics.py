@@ -65,7 +65,8 @@ class SessionDiagnostics:
             return self.session.advanced_diagnostics_state()
 
     def raw_memories(self, numbers):
-        """Return driver raw-memory text only after an explicit local opt-in."""
+        """Return driver raw-memory text only after an explicit local
+        opt-in."""
         with self.session.lock:
             self.session._ensure_idle()
             if not self.session.advanced_diagnostics:
@@ -84,7 +85,8 @@ class SessionDiagnostics:
                     raw = str(radio.get_raw_memory(number))
                 except Exception as exc:
                     raise self.error_type(
-                            f'Unable to read raw memory {number}.', 422) from exc
+                            f'Unable to read raw memory {number}.',
+                            422) from exc
                 if len(raw) > 262144:
                     raise self.error_type(
                             f'Raw memory {number} is too large to display.',
@@ -119,7 +121,8 @@ class SessionDiagnostics:
         with self.session.lock:
             radio = self.session._tab.radio
             if radio is None:
-                raise self.error_type('Open a radio image before editing.', 409)
+                raise self.error_type('Open a radio image before editing.',
+                                      409)
             if not isinstance(radio, chirp_common.CloneModeRadio):
                 return None
             suffix = Path(self.session.source_name).suffix or '.img'
@@ -149,11 +152,13 @@ class SessionDiagnostics:
                     f'chirp-web-backup-{int(time.time())}-{uuid.uuid4().hex}-'
                     f'{self.session._safe_name(self.session.source_name)}')
                 try:
-                    shutil.copyfile(path, self.session.backup_directory / retained_name)
+                    shutil.copyfile(path,
+                                    self.session.backup_directory /
+                                    retained_name)
                     self.session._prune_retained_backups()
                 except OSError as exc:
                     self.log.exception('Unable to retain backup in %s',
-                                  self.session.backup_directory)
+                                       self.session.backup_directory)
                     backup['retention_error'] = str(exc)
             return backup
 
@@ -166,7 +171,8 @@ class SessionDiagnostics:
             return str(self.session._backup_file(backup_id))
 
     def restore_backup(self, backup_id):
-        """Open a backup as an independent tab without replacing the current."""
+        """Open a backup as an independent tab without replacing the
+        current."""
         with self.session.lock:
             path = self.session._backup_file(backup_id)
             data = base64.b64encode(path.read_bytes()).decode('ascii')
@@ -185,7 +191,8 @@ class SessionDiagnostics:
                 path.unlink()
             except OSError as exc:
                 raise self.error_type(
-                        'The retained backup could not be deleted.', 500) from exc
+                        'The retained backup could not be deleted.',
+                        500) from exc
             return {'deleted': backup_id}
 
     def diagnostic_bundle(self):
@@ -281,5 +288,6 @@ class SessionDiagnostics:
             if not isinstance(filename, str) or not isinstance(data, str):
                 raise self.error_type('Invalid recovery tab.', 422)
             opened.append(self.session.open_image(filename, data,
-                                          confirm_replace=True))
-        return {'opened': len(opened), 'active_tab_id': self.session.active_tab_id}
+                                                  confirm_replace=True))
+        return {'opened': len(opened),
+                'active_tab_id': self.session.active_tab_id}

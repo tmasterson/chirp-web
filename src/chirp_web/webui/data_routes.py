@@ -110,7 +110,7 @@ def register_data_routes(app, session, transfers, log):
 
     @app.patch('/api/memories/{number}')
     def update_memory(number: str, payload: MemoryUpdate):
-        number = int(number) if number.isdecimal() else number
+        number = str(int(number)) if number.isdecimal() else number
         values = payload.model_dump(exclude_unset=True)
         extra_changes = values.pop('extra_changes', None)
         if any(value is None for value in values.values()):
@@ -127,7 +127,7 @@ def register_data_routes(app, session, transfers, log):
     @app.patch('/api/memories/{number}/banks')
     def update_memory_bank_membership(
             number: str, payload: BankMembershipRequest):
-        number = int(number) if number.isdecimal() else number
+        number = str(int(number)) if number.isdecimal() else number
         return session.update_memory_bank_membership(
                 number,
                 payload.model,
