@@ -88,7 +88,8 @@ class DMRMARCRadio(base.NetworkResultRadio):
 
         rs = RadioSetting(
             "color_code", "Color Code", RadioSettingValueList(
-                range(16), int(repeater.get('color_code', 0))))
+                range(16), current_index=int(
+                    repeater.get('color_code', 0))))
         mem.extra.append(rs)
 
         return mem

@@ -93,6 +93,11 @@ permissions vary by distribution and cable.
 - To update an existing clone, run `git pull` and then
   `python -m pip install .` again from that directory, with the environment
   activated.
+- Contributors should install test dependencies with
+  `python -m pip install -r requirements.txt -r test-requirements.txt`.
+  These files use `constraints.txt`, the tested direct-dependency set; update
+  it deliberately and validate the full suite when changing dependency
+  versions.
 - The server listens only on `127.0.0.1` and is intended for local use. Review
   the selected image before writing it to a radio; writing replaces the radio's
   current programming.

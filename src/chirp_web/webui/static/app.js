@@ -15,8 +15,14 @@
  * along with this program.  If not, see <http://www.gnu.org/licenses/>.
  */
 
-import { $, CONNECTION_PREFERENCES_KEY, CONNECTION_PROFILES_KEY, IMAGE_EXTENSIONS, notice, PREFERENCES_KEY, state, translations } from './state.js';
+import { $, IMAGE_EXTENSIONS, notice, state, translations } from './state.js';
 import { api } from './api.js';
+import { setupConnectionProfiles } from './connection_profiles.js';
+import { setupSourceHistory } from './source_history.js';
+import {
+  loadColumnsForSession, loadConnectionPreferences, loadPreferences,
+  renderRecentPorts, saveConnectionPreferences, savePreferences, selectedPort,
+} from './preferences.js';
 import { extraColumnValue, formatFrequency, tsvToCsv, txFrequency } from './utils.js';
 
 
@@ -37,96 +43,6 @@ function applyTranslations() {
   $('#querySource').textContent = t('searchSource');
   $('#cancelSourceQuery').textContent = t('cancelSearch');
   $('#languageSelect').value = state.language;
-}
-
-function loadPreferences() {
-  const saved = loadPreferenceData();
-  if (typeof saved.hideEmpty === 'boolean') state.hideEmpty = saved.hideEmpty;
-  if (typeof saved.txFrequencyWorkflow === 'boolean') {
-    state.txFrequencyWorkflow = saved.txFrequencyWorkflow;
-  }
-  if (typeof saved.autoBandplanEdits === 'boolean') {
-    state.autoBandplanEdits = saved.autoBandplanEdits;
-  }
-  for (const column of Object.keys(state.columns)) {
-    if (typeof saved.columns?.[column] === 'boolean') {
-      state.columns[column] = saved.columns[column];
-    }
-  }
-  if (translations[saved.language]) state.language = saved.language;
-}
-
-function loadPreferenceData() {
-  try {
-    return JSON.parse(localStorage.getItem(PREFERENCES_KEY) || '{}');
-  } catch {
-    return {};
-  }
-}
-
-function loadColumnsForSession() {
-  if (!state.session || state.columnRadioId === state.session.name) return;
-  const saved = loadPreferenceData();
-  const columns = saved.columnsByRadio?.[state.session.name] || saved.columns;
-  if (columns) {
-    for (const column of Object.keys(state.columns)) {
-      if (typeof columns[column] === 'boolean') state.columns[column] = columns[column];
-    }
-  }
-  state.columnRadioId = state.session.name;
-}
-
-function savePreferences() {
-  try {
-    localStorage.setItem(PREFERENCES_KEY, JSON.stringify({
-      hideEmpty: state.hideEmpty,
-      txFrequencyWorkflow: state.txFrequencyWorkflow,
-      autoBandplanEdits: state.autoBandplanEdits,
-      columns: state.columns,
-      columnsByRadio: {
-        ...(loadPreferenceData().columnsByRadio || {}),
-        ...(state.session ? { [state.session.name]: state.columns } : {}),
-      },
-      language: state.language,
-    }));
-  } catch (error) {
-    showNotice(`Could not save view preferences: ${error.message}`, true);
-  }
-}
-
-function loadConnectionPreferences() {
-    try {
-      return JSON.parse(localStorage.getItem(CONNECTION_PREFERENCES_KEY) || '{}');
-    } catch {
-      return {};
-    }
-  }
-
-function saveConnectionPreferences() {
-    try {
-      const saved = loadConnectionPreferences();
-      saved.radioId = $('#radioModel').value;
-      saved.port = selectedPort();
-      saved.recentRadioIds = [saved.radioId, ...(saved.recentRadioIds || [])]
-        .filter((value, index, values) => value && values.indexOf(value) === index)
-        .slice(0, 5);
-      saved.recentPorts = [saved.port, ...(saved.recentPorts || [])]
-        .filter((value, index, values) => value && values.indexOf(value) === index)
-        .slice(0, 5);
-      localStorage.setItem(CONNECTION_PREFERENCES_KEY, JSON.stringify(saved));
-      renderRecentPorts(saved.recentPorts);
-    } catch (error) {
-      showNotice(`Could not save connection preferences: ${error.message}`, true);
-    }
-  }
-
-function selectedPort() {
-    return $('#manualSerialPort').value.trim() || $('#serialPort').value;
-  }
-
-function renderRecentPorts(ports = loadConnectionPreferences().recentPorts || []) {
-    const list = $('#recentSerialPorts');
-    list.replaceChildren(...ports.map((port) => new Option(port)));
 }
 
 function isFilteredView() {
@@ -1986,12 +1902,16 @@ $('#scanUsb').addEventListener('click', async () => {
   }
 });
 
-$('#radioModel').addEventListener('change', saveConnectionPreferences);
+$('#radioModel').addEventListener('change', () => {
+  saveConnectionPreferences(showNotice);
+});
 $('#serialPort').addEventListener('change', () => {
   $('#manualSerialPort').value = '';
-  saveConnectionPreferences();
+  saveConnectionPreferences(showNotice);
 });
-$('#manualSerialPort').addEventListener('change', saveConnectionPreferences);
+$('#manualSerialPort').addEventListener('change', () => {
+  saveConnectionPreferences(showNotice);
+});
 
 $('#sourceName').addEventListener('change', updateSourceExample);
 function setSourceQueryRunning(running) {
@@ -2607,19 +2527,19 @@ $('#channelDirection').addEventListener('change', async () => {
 });
 $('#hideEmpty').addEventListener('change', async () => {
   state.hideEmpty = $('#hideEmpty').checked;
-  savePreferences();
+  savePreferences(showNotice);
   state.start = isFilteredView() ? 0 : state.session.memory_bounds[0];
   state.selected.clear();
   try { await loadMemories(); } catch (error) { showNotice(error.message, true); }
 });
 $('#txFrequencyWorkflow').addEventListener('change', () => {
   state.txFrequencyWorkflow = $('#txFrequencyWorkflow').checked;
-  savePreferences();
+  savePreferences(showNotice);
   renderMemories(state.pageMemories);
 });
 $('#autoBandplanEdits').addEventListener('change', () => {
   state.autoBandplanEdits = $('#autoBandplanEdits').checked;
-  savePreferences();
+  savePreferences(showNotice);
 });
 [
   ['name', 'showNameColumn'],
@@ -2633,7 +2553,7 @@ $('#autoBandplanEdits').addEventListener('change', () => {
 ].forEach(([column, id]) => {
   $(`#${id}`).addEventListener('change', () => {
     state.columns[column] = $(`#${id}`).checked;
-    savePreferences();
+    savePreferences(showNotice);
     updateBulkControls();
   });
 });
@@ -2698,7 +2618,7 @@ $('#gotoButton').addEventListener('click', async () => {
   $('#channelDirection').value = 'asc';
   state.hideEmpty = false;
   $('#hideEmpty').checked = false;
-  savePreferences();
+  savePreferences(showNotice);
   state.start = number;
   try { await loadMemories(); } catch (error) { showNotice(error.message, true); }
 });
@@ -2823,150 +2743,6 @@ $('#deleteSelected').addEventListener('click', async () => {
   }
 });
 
-function loadConnectionProfiles() {
-  try {
-    const profiles = JSON.parse(localStorage.getItem(CONNECTION_PROFILES_KEY) || '[]');
-    return Array.isArray(profiles) ? profiles.filter((profile) =>
-      profile && typeof profile.name === 'string' && typeof profile.radioId === 'string' &&
-      typeof profile.port === 'string').slice(0, 50) : [];
-  } catch {
-    return [];
-  }
-}
-
-function saveConnectionProfiles(profiles) {
-  localStorage.setItem(CONNECTION_PROFILES_KEY, JSON.stringify(profiles.slice(0, 50)));
-}
-
-function renderConnectionProfiles() {
-  const select = $('#connectionProfile');
-  const selected = select.value;
-  select.replaceChildren(new Option(t('chooseProfile'), ''));
-  loadConnectionProfiles().forEach((profile) => {
-    select.add(new Option(profile.name, profile.name));
-  });
-  select.value = [...select.options].some((option) => option.value === selected)
-    ? selected : '';
-  $('#loadConnectionProfile').disabled = !select.value;
-  $('#deleteConnectionProfile').disabled = !select.value;
-}
-
-function applyConnectionProfile(profile) {
-  if ([...$('#radioModel').options].some((option) => option.value === profile.radioId)) {
-    $('#radioModel').value = profile.radioId;
-  }
-  $('#manualSerialPort').value = profile.port;
-  $('#serialPort').value = [...$('#serialPort').options]
-    .some((option) => option.value === profile.port) ? profile.port : '';
-  $('#connectionProfileNotes').value = profile.notes || '';
-  saveConnectionPreferences();
-}
-
-$('#connectionProfile').addEventListener('change', () => {
-  const profile = loadConnectionProfiles().find(
-    (item) => item.name === $('#connectionProfile').value);
-  $('#connectionProfileNotes').value = profile?.notes || '';
-  $('#loadConnectionProfile').disabled = !profile;
-  $('#deleteConnectionProfile').disabled = !profile;
-});
-$('#saveConnectionProfile').addEventListener('click', () => {
-  const name = $('#connectionProfileName').value.trim();
-  if (!name) return showNotice(t('profileNameRequired'), true);
-  const profile = {
-    name, radioId: $('#radioModel').value, port: selectedPort(),
-    notes: $('#connectionProfileNotes').value.trim(),
-  };
-  const profiles = loadConnectionProfiles().filter((item) => item.name !== name);
-  profiles.push(profile);
-  try {
-    saveConnectionProfiles(profiles);
-    renderConnectionProfiles();
-    $('#connectionProfile').value = name;
-    showNotice(t('profileSaved'));
-  } catch (error) { showNotice(error.message, true); }
-});
-$('#loadConnectionProfile').addEventListener('click', () => {
-  const profile = loadConnectionProfiles().find(
-    (item) => item.name === $('#connectionProfile').value);
-  if (!profile) return;
-  applyConnectionProfile(profile);
-  showNotice(t('profileLoaded'));
-});
-$('#deleteConnectionProfile').addEventListener('click', () => {
-  const name = $('#connectionProfile').value;
-  if (!name) return;
-  saveConnectionProfiles(loadConnectionProfiles().filter((item) => item.name !== name));
-  renderConnectionProfiles();
-  showNotice(t('profileDeleted'));
-});
-$('#exportConnectionProfiles').addEventListener('click', () => {
-  downloadBlob('chirp-web-connection-profiles.json', new Blob([
-    JSON.stringify({ profiles: loadConnectionProfiles() }, null, 2),
-  ], { type: 'application/json' }));
-  showNotice(t('profilesExported'));
-});
-$('#importConnectionProfiles').addEventListener('change', async (event) => {
-  const file = event.target.files[0];
-  event.target.value = '';
-  if (!file || file.size > 1024 * 1024) return;
-  try {
-    const value = JSON.parse(await file.text());
-    const imported = Array.isArray(value) ? value : value.profiles;
-    if (!Array.isArray(imported)) throw new Error('This is not a connection profile export.');
-    const profiles = [...loadConnectionProfiles(), ...imported]
-      .filter((item) => item && typeof item.name === 'string' &&
-        typeof item.radioId === 'string' && typeof item.port === 'string')
-      .map(({ name, radioId, port, notes }) => ({
-        name: name.slice(0, 80), radioId, port, notes: typeof notes === 'string'
-          ? notes.slice(0, 500) : '',
-      }));
-    saveConnectionProfiles([...new Map(profiles.map((item) => [item.name, item])).values()]);
-    renderConnectionProfiles();
-    showNotice(t('profilesImported'));
-  } catch (error) { showNotice(error.message, true); }
-});
-
-async function loadSourceHistory() {
-  const container = $('#sourceHistoryRows');
-  try {
-    const response = await api('/api/sources/history');
-    const records = Array.isArray(response) ? response : response.records || [];
-    container.replaceChildren();
-    records.slice(0, 20).forEach((record) => {
-      const item = document.createElement('article');
-      item.className = 'history-item';
-      const title = document.createElement('strong');
-      title.textContent = record.source || record.source_id || 'Source job';
-      const detail = document.createElement('span');
-      const duration = Number.isFinite(record.duration_ms) ? ` · ${record.duration_ms} ms` : '';
-      detail.textContent = `${record.state || 'unknown'} · ${record.count ?? 0} results${duration}${record.error ? ` · ${record.error}` : ''}`;
-      const retry = document.createElement('button');
-      retry.type = 'button';
-      retry.className = 'button button-quiet';
-      retry.textContent = t('retry');
-      retry.disabled = !record.id;
-      retry.addEventListener('click', async () => {
-        try {
-          retry.disabled = true;
-          await api(`/api/sources/history/${encodeURIComponent(record.id)}/retry`, {
-            method: 'POST',
-          });
-          showNotice(t('sourceJobRestarted'));
-          await loadSourceHistory();
-        } catch (error) { showNotice(error.message, true); }
-      });
-      item.append(title, detail, retry);
-      container.append(item);
-    });
-    $('#sourceHistoryStatus').textContent = records.length
-      ? `${records.length} recent source job${records.length === 1 ? '' : 's'}.`
-      : t('sourceHistoryEmpty');
-  } catch (error) {
-    $('#sourceHistoryStatus').textContent = error.message;
-  }
-}
-
-$('#refreshSourceHistory').addEventListener('click', loadSourceHistory);
 $('#showAbout').addEventListener('click', async () => {
   try {
     const about = await api('/api/about');
@@ -3081,19 +2857,23 @@ async function initialize() {
     updateImportPlacement();
     $('#languageSelect').addEventListener('change', () => {
       state.language = $('#languageSelect').value;
-      savePreferences();
+      savePreferences(showNotice);
       applyTranslations();
       showNotice(t('scanComplete'));
     });
+    const loadSourceHistory = setupSourceHistory({ api, t, showNotice });
     await Promise.all([
-      loadRadios(), loadPorts(), loadSources(), loadConfigurations(), loadSourceHistory(),
+      loadRadios(), loadPorts(), loadSources(), loadConfigurations(),
+      loadSourceHistory(),
     ]);
     try {
       await loadRecentImages();
     } catch (error) {
       showNotice(`Browser recents are unavailable: ${error.message}`, true);
     }
-    renderConnectionProfiles();
+    setupConnectionProfiles({
+      t, showNotice, downloadBlob, saveConnectionPreferences,
+    });
     try {
       const requestedTab = new URLSearchParams(window.location.search).get('tab');
       if (requestedTab) {

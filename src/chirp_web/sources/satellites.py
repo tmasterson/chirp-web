@@ -44,8 +44,8 @@ class AmateurSatellites(base.NetworkResultRadio):
     def do_fetch(self, status, params):
         status.send_status('Downloading AMSAT satellite data', 10)
         try:
-            response = requests.get(AMSAT_URL, headers=base.HEADERS,
-                                   timeout=30)
+            response = requests.get(
+                    AMSAT_URL, headers=base.HEADERS, timeout=30)
             response.raise_for_status()
             entries = response.json()
         except (requests.exceptions.RequestException, ValueError) as exc:
@@ -110,7 +110,8 @@ class SatNOGS(base.NetworkResultRadio):
                                     timeout=30)
             response.raise_for_status()
             data = response.json()
-            if isinstance(data, dict) and isinstance(data.get('results'), list):
+            if (isinstance(data, dict) and
+                    isinstance(data.get('results'), list)):
                 results.extend(data['results'])
                 next_url = data.get('next')
             elif isinstance(data, list):

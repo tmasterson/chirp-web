@@ -34,7 +34,10 @@ from pathlib import Path
 from typing import TypedDict
 
 from chirp_web import bandplan, chirp_common, directory, settings
+from chirp_web.webui.backups import BackupStorage
 from chirp_web.webui.diagnostics import SessionDiagnostics
+from chirp_web.webui.memory_history import MemoryHistory
+from chirp_web.webui.memory_operations import MemoryOperations
 
 
 LOG = logging.getLogger(__name__)
@@ -131,10 +134,11 @@ class DriverSession:
         self.request_tab_id = contextvars.ContextVar(
                 'chirp_web_tab_id', default=None)
         self.active_job = None
-        self.backup_directory: Path | None = None
-        self.backup_retention = 10
+        self._backups = BackupStorage(WebServiceError)
         self.advanced_diagnostics = False
         self._diagnostics = SessionDiagnostics(self, WebServiceError, LOG)
+        self._memory_history = MemoryHistory(self, WebServiceError, LOG)
+        self._memory_operations = MemoryOperations(self, WebServiceError)
         self._new_tab()
 
     @property
@@ -215,7 +219,7 @@ class DriverSession:
         """Persist a user-requested image-tab order without changing state."""
         with self.lock:
             if (len(tab_ids) != len(self.tabs) or
-                set(tab_ids) != set(self.tabs)):
+                    set(tab_ids) != set(self.tabs)):
                 raise WebServiceError('The requested tab order is invalid.',
                                       422)
             self.tabs = {tab_id: self.tabs[tab_id] for tab_id in tab_ids}
@@ -314,64 +318,17 @@ class DriverSession:
         return self._tab.clipboard_results
 
     def _record_memory_change(self, before, after):
-        if not before:
-            return
-        self.undo_stack.append({
-            number: (copy.deepcopy(before[number]),
-                     copy.deepcopy(after[number]))
-            for number in before
-        })
-        del self.undo_stack[:-50]
-        self.redo_stack.clear()
+        self._memory_history.record(before, after)
 
     def history(self):
         with self.lock:
-            return {'can_undo': bool(self.undo_stack),
-                    'can_redo': bool(self.redo_stack)}
-
-    def _apply_history(self, source, target):
-        with self.lock:
-            self._ensure_idle()
-            radio = self._require_radio()
-            if not source:
-                raise WebServiceError('There is no change to replay.', 409)
-            change = source[-1]
-            current = {
-                number: copy.deepcopy(radio.get_memory(number))
-                for number in change
-            }
-            try:
-                for number, (before, after) in change.items():
-                    memory = before if target is self.redo_stack else after
-                    if memory.empty:
-                        radio.erase_memory(number)
-                    else:
-                        radio.set_memory(copy.deepcopy(memory))
-            except Exception as exc:
-                for number, memory in current.items():
-                    try:
-                        if memory.empty:
-                            radio.erase_memory(number)
-                        else:
-                            radio.set_memory(memory)
-                    except Exception:
-                        LOG.exception(
-                                'Failed to restore memory %s after history '
-                                'operation', number)
-                raise WebServiceError(
-                        'The radio driver could not replay this change.',
-                        422) from exc
-            source.pop()
-            target.append(change)
-            self.dirty = True
+            return self._memory_history.summary()
 
     def undo(self):
-        self._apply_history(self.undo_stack, self.redo_stack)
-        return self.history()
+        return self._memory_history.undo()
 
     def redo(self):
-        self._apply_history(self.redo_stack, self.undo_stack)
-        return self.history()
+        return self._memory_history.redo()
 
     def _require_radio(self):
         if self.radio is None:
@@ -495,85 +452,12 @@ class DriverSession:
     def backup_settings(self):
         """Return the optional local directory used for retained backups."""
         with self.lock:
-            return {
-                'directory': (str(self.backup_directory)
-                              if self.backup_directory else None),
-                'retention': self.backup_retention,
-            }
+            return self._backups.settings()
 
     def configure_backup_storage(self, directory, retention):
         """Configure explicitly requested on-disk backup retention."""
         with self.lock:
-            if directory is None:
-                self.backup_directory = None
-                return self.backup_settings()
-            path = Path(directory).expanduser()
-            try:
-                path = path.resolve(strict=True)
-            except (OSError, RuntimeError) as exc:
-                raise WebServiceError(
-                        'The backup directory does not exist.', 422) from exc
-            if not path.is_dir():
-                raise WebServiceError(
-                        'The backup location must be a directory.', 422)
-            self.backup_directory = path
-            self.backup_retention = retention
-            self._prune_retained_backups()
-            return self.backup_settings()
-
-    def _retained_backup_paths(self):
-        if self.backup_directory is None:
-            return []
-        try:
-            return sorted(
-                    (path for path in self.backup_directory.glob(
-                        'chirp-web-backup-*') if path.is_file()),
-                    key=lambda path: path.stat().st_mtime)
-        except OSError as exc:
-            raise WebServiceError(
-                    'The retained backup directory is unavailable.',
-                    500) from exc
-
-    def _prune_retained_backups(self):
-        paths = self._retained_backup_paths()
-        for path in paths[:-self.backup_retention]:
-            try:
-                path.unlink()
-            except OSError as exc:
-                raise WebServiceError(
-                        'An expired retained backup could not be removed.',
-                        500) from exc
-
-    def _backup_entries(self):
-        temporary = [{
-            'id': Path(path).name,
-            'filename': self._safe_name(self.source_name),
-            'created_at': int(Path(path).stat().st_mtime),
-            'persistent': False,
-        } for path in self._tab.backup_paths if Path(path).exists()]
-        retained = [{
-            'id': path.name,
-            'filename': path.name.split('-', 5)[-1],
-            'created_at': int(path.stat().st_mtime),
-            'persistent': True,
-        } for path in self._retained_backup_paths()]
-        return sorted(
-                temporary + retained, key=lambda item: item['created_at'])
-
-    def _backup_file(self, backup_id):
-        if not re.fullmatch(r'[A-Za-z0-9._ -]{1,255}', backup_id):
-            raise WebServiceError('Backup was not found.', 404)
-        for path in self._tab.backup_paths:
-            if Path(path).name == backup_id and Path(path).is_file():
-                return Path(path)
-        if self.backup_directory is not None:
-            candidate = self.backup_directory / backup_id
-            if (candidate.name == backup_id and
-                    candidate.is_file() and
-                    candidate.parent == self.backup_directory and
-                    candidate.name.startswith('chirp-web-backup-')):
-                return candidate
-        raise WebServiceError('Backup was not found.', 404)
+            return self._backups.configure(directory, retention)
 
     def configurations(self):
         """Return built-in and bundled desktop configuration templates."""
@@ -1041,7 +925,8 @@ class DriverSession:
                     ]
                 if filters:
                     if match not in ('all', 'any'):
-                        raise WebServiceError('Invalid filter match mode.', 422)
+                        raise WebServiceError(
+                                'Invalid filter match mode.', 422)
 
                     def filter_match(row, item):
                         field = item['field']
@@ -1129,594 +1014,33 @@ class DriverSession:
                     'memories': rows}
 
     def delete_memories(self, numbers: list[int | str], shift=''):
-        """Erase selected channels, rolling back on driver failures."""
-        with self.lock:
-            self._ensure_idle()
-            radio = self._require_radio()
-            rf = radio.get_features()
-            if not rf.can_delete:
-                raise WebServiceError(
-                        'This radio does not support deleting memories.', 422)
-            if not numbers:
-                raise WebServiceError('Select at least one memory.', 422)
-            if len(numbers) != len(set(numbers)):
-                raise WebServiceError(
-                        'A memory can only be selected once.', 422)
-            for number in numbers:
-                self._validate_memory_id(radio, number)
-            if shift not in ('', 'block', 'all'):
-                raise WebServiceError('Invalid channel shift mode.', 422)
-            if shift and any(
-                    not isinstance(number, int) for number in numbers):
-                raise WebServiceError(
-                        'Special channels cannot be shifted.', 422)
-            deleted = sorted(number for number in numbers
-                             if isinstance(number, int))
-            if shift:
-                low, high = rf.memory_bounds
-                end = high
-                if shift == 'block':
-                    for number in range(max(deleted) + 1, high + 1):
-                        if radio.get_memory(number).empty:
-                            end = number - 1
-                            break
-                affected = range(min(deleted), end + 1)
-            else:
-                affected = numbers
-            backups = {
-                number: copy.deepcopy(radio.get_memory(number))
-                for number in affected
-            }
-            after = copy.deepcopy(backups)
-            if shift:
-                slots = list(affected)
-                remaining = [
-                    copy.deepcopy(backups[number])
-                    for number in slots if number not in deleted
-                ]
-                remaining.extend(
-                    self._empty_memory(number)
-                    for number in slots[len(remaining):])
-                after = {
-                    number: memory
-                    for number, memory in zip(slots, remaining)
-                }
-            else:
-                for number in numbers:
-                    after[number] = self._empty_memory(number)
-            erased = sum(
-                not radio.get_memory(number).empty for number in numbers)
-            attempted = []
-            try:
-                for number in sorted(after):
-                    memory = after[number]
-                    attempted.append(number)
-                    if memory.empty:
-                        radio.erase_memory(number)
-                    else:
-                        radio.set_memory(memory)
-            except Exception as exc:
-                for number in reversed(attempted):
-                    try:
-                        memory = backups[number]
-                        if memory.empty:
-                            radio.erase_memory(number)
-                        else:
-                            radio.set_memory(memory)
-                    except Exception:
-                        LOG.exception(
-                                'Failed to restore memory %s after deletion',
-                                number)
-                raise WebServiceError(
-                        'The radio driver could not delete the selected '
-                        'memories.', 422) from exc
-            if erased or shift:
-                self._record_memory_change(
-                        backups, {
-                            number: copy.deepcopy(radio.get_memory(number))
-                            for number in backups
-                        })
-                self.dirty = True
-            return {'deleted': erased}
+        return self._memory_operations.delete_memories(numbers, shift)
 
     def move_memories(self, numbers: list[int], direction: str):
-        """Move selected channels one position while preserving their order."""
-        with self.lock:
-            self._ensure_idle()
-            radio = self._require_radio()
-            features = radio.get_features()
-            if not features.can_delete:
-                raise WebServiceError(
-                        'This radio does not support channel rearrangement.',
-                        422)
-            low, high = features.memory_bounds
-            if direction not in ('up', 'down') or not numbers:
-                raise WebServiceError('Select channels and a direction.', 422)
-            if any(type(number) is not int or not low <= number <= high
-                   for number in numbers):
-                raise WebServiceError(
-                        'Only numbered channels can be moved.', 422)
-            selected = set(numbers)
-            ordered = sorted(selected)
-            groups = []
-            for number in ordered:
-                if not groups or number > groups[-1][-1] + 1:
-                    groups.append([number])
-                else:
-                    groups[-1].append(number)
-            ranges = []
-            for group in groups:
-                first, last = group[0], group[-1]
-                if direction == 'up' and first > low:
-                    ranges.append((first - 1, last, -1))
-                elif direction == 'down' and last < high:
-                    ranges.append((first, last + 1, 1))
-            if not ranges:
-                return {'moved': 0}
-            affected = {
-                number for start, end, _ in ranges
-                for number in range(start, end + 1)
-            }
-            before = {
-                number: copy.deepcopy(radio.get_memory(number))
-                for number in affected
-            }
-            after = copy.deepcopy(before)
-            for start, end, delta in ranges:
-                span = [copy.deepcopy(before[number])
-                        for number in range(start, end + 1)]
-                if delta < 0:
-                    reordered = span[1:] + span[:1]
-                else:
-                    reordered = span[-1:] + span[:-1]
-                for number, memory in zip(range(start, end + 1), reordered):
-                    memory.number = number
-                    after[number] = memory
-            try:
-                for number in sorted(after):
-                    memory = after[number]
-                    if memory.empty:
-                        radio.erase_memory(number)
-                    else:
-                        radio.set_memory(memory)
-            except Exception as exc:
-                self._restore_memories(radio, before, after)
-                raise WebServiceError(
-                        'The radio driver could not move these channels.',
-                        422) from exc
-            self._record_memory_change(
-                    before, {number: copy.deepcopy(radio.get_memory(number))
-                             for number in affected})
-            self.dirty = True
-            return {'moved': len(selected)}
+        return self._memory_operations.move_memories(numbers, direction)
 
     def insert_memory_row(self, number: int):
-        """Open an empty numbered channel by shifting later channels down."""
-        with self.lock:
-            self._ensure_idle()
-            radio = self._require_radio()
-            features = radio.get_features()
-            if not features.can_delete:
-                raise WebServiceError(
-                        'This radio does not support channel insertion.',
-                        422)
-            low, high = features.memory_bounds
-            if type(number) is not int or not low <= number < high:
-                raise WebServiceError('Insert position is out of range.', 422)
-            empty = next((candidate for candidate in range(number, high + 1)
-                          if radio.get_memory(candidate).empty), None)
-            if empty is None:
-                raise WebServiceError(
-                        'There is no empty channel available for insertion.',
-                        409)
-            before = {
-                channel: copy.deepcopy(radio.get_memory(channel))
-                for channel in range(number, empty + 1)
-            }
-            after = {}
-            for channel in range(number + 1, empty + 1):
-                memory = copy.deepcopy(before[channel - 1])
-                memory.number = channel
-                after[channel] = memory
-            after[number] = self._empty_memory(number)
-            try:
-                for channel in range(number, empty + 1):
-                    memory = after[channel]
-                    if memory.empty:
-                        radio.erase_memory(channel)
-                    else:
-                        radio.set_memory(memory)
-            except Exception as exc:
-                self._restore_memories(radio, before, after)
-                raise WebServiceError(
-                        'The radio driver could not insert a channel row.',
-                        422) from exc
-            self._record_memory_change(
-                    before, {channel: copy.deepcopy(radio.get_memory(channel))
-                             for channel in before})
-            self.dirty = True
-            return {'inserted': number}
-
-    @staticmethod
-    def _restore_memories(radio, before, attempted):
-        for number in reversed(list(attempted)):
-            memory = before[number]
-            try:
-                if memory.empty:
-                    radio.erase_memory(number)
-                else:
-                    radio.set_memory(copy.deepcopy(memory))
-            except Exception:
-                LOG.exception('Failed to restore memory %s', number)
+        return self._memory_operations.insert_memory_row(number)
 
     def copy_memories(self, numbers: list[int | str], cut=False):
-        """Copy selected channels to a server-side portable clipboard."""
-        with self.lock:
-            self._ensure_idle()
-            radio = self._require_radio()
-            if not numbers or len(numbers) > 200:
-                raise WebServiceError(
-                        'Select between 1 and 200 channels.', 422)
-            memories = []
-            for number in numbers:
-                self._validate_memory_id(radio, number)
-                memory = copy.deepcopy(radio.get_memory(number))
-                if memory.empty:
-                    continue
-                memory.number = len(memories)
-                memory.extd_number = ''
-                memory.extra = settings.RadioSettingGroup('extra', 'Extra')
-                memories.append(memory)
-            if not memories:
-                raise WebServiceError('The selection contains no channels.',
-                                      422)
-            token = str(uuid.uuid4())
-            self.clipboard_results[token] = memories
-            if len(self.clipboard_results) > 10:
-                self.clipboard_results.pop(next(iter(self.clipboard_results)))
-            if cut:
-                self.delete_memories(numbers)
-            return {'clipboard_id': token, 'count': len(memories)}
+        return self._memory_operations.copy_memories(numbers, cut)
 
     def paste_memories(self, token: str, start: int, overwrite=False):
-        """Paste clipboard channels at explicit destinations."""
-        with self.lock:
-            self._ensure_idle()
-            radio = self._require_radio()
-            memories = self.clipboard_results.get(token)
-            if memories is None:
-                raise WebServiceError('The clipboard has expired.', 404)
-            low, high = radio.get_features().memory_bounds
-            destinations = range(start, start + len(memories))
-            if (type(start) is not int or start < low or
-                    start + len(memories) - 1 > high):
-                raise WebServiceError('Paste range is outside channel bounds.',
-                                      422)
-            before = {
-                number: copy.deepcopy(radio.get_memory(number))
-                for number in destinations
-            }
-            if not overwrite and any(not memory.empty
-                                     for memory in before.values()):
-                raise WebServiceError(
-                        'Paste would overwrite channels. Confirm overwrite.',
-                        409)
-            after = {}
-            warnings = []
-            for destination, source in zip(destinations, memories):
-                memory = copy.deepcopy(source)
-                memory.number = destination
-                try:
-                    warnings_found, errors = (
-                        chirp_common.split_validation_msgs(
-                            radio.validate_memory(memory)))
-                except Exception as exc:
-                    raise WebServiceError(
-                            f'Channel {destination}: {exc}', 422) from exc
-                if errors:
-                    raise WebServiceError(
-                            f'Channel {destination}: ' +
-                            '; '.join(str(error) for error in errors), 422)
-                warnings.extend(str(warning) for warning in warnings_found)
-                after[destination] = memory
-            try:
-                for number, memory in after.items():
-                    radio.set_memory(memory)
-            except Exception as exc:
-                self._restore_memories(radio, before, after)
-                raise WebServiceError(
-                        'The radio driver could not paste the channels.',
-                        422) from exc
-            self._record_memory_change(
-                    before, {number: copy.deepcopy(radio.get_memory(number))
-                             for number in before})
-            self.dirty = True
-            return {'pasted': len(after), 'warnings': warnings}
+        return self._memory_operations.paste_memories(token, start, overwrite)
 
     def update_memory(self, number: int | str, values: dict,
                       extra_changes=None):
-        """Validate and apply changes to a memory in the open image."""
-        with self.lock:
-            self._ensure_idle()
-            radio = self._require_radio()
-            self._validate_memory_id(radio, number)
-            rf = radio.get_features()
-            if not values and not extra_changes:
-                raise WebServiceError('Provide at least one memory field.')
-            memory = radio.get_memory(number)
-            original = copy.deepcopy(memory)
-            txfreq = values.pop('txfreq', None)
-            if txfreq is not None:
-                if ('offset' in memory.immutable or
-                        'duplex' in memory.immutable):
-                    raise WebServiceError(
-                            'Transmit frequency cannot be changed for this '
-                            'channel.', 422)
-                receive_frequency = values.get('freq', memory.freq)
-                if 'split' in rf.valid_duplexes:
-                    memory.duplex = 'split'
-                    memory.offset = txfreq
-                else:
-                    memory.duplex = (
-                        '' if txfreq == receive_frequency else
-                        '-' if txfreq < receive_frequency else '+')
-                    memory.offset = abs(txfreq - receive_frequency)
-            for field, value in values.items():
-                if field not in MEMORY_FIELDS:
-                    raise WebServiceError(f'Unsupported memory field: {field}',
-                                          422)
-                required_feature = {
-                    'name': 'has_name',
-                    'mode': 'has_mode',
-                    'offset': 'has_offset',
-                    'ctone': 'has_ctone',
-                    'dtcs': 'has_dtcs',
-                    'rx_dtcs': 'has_rx_dtcs',
-                    'dtcs_polarity': 'has_dtcs_polarity',
-                    'cross_mode': 'has_cross',
-                    'tuning_step': 'has_tuning_step',
-                    'comment': 'has_comment',
-                }.get(field)
-                if field == 'power' and not (
-                        rf.has_variable_power or rf.valid_power_levels):
-                    raise WebServiceError(
-                            'The radio does not support power selection.',
-                            422)
-                if required_feature and not getattr(rf, required_feature):
-                    raise WebServiceError(
-                            f'The radio does not support {field}.', 422)
-                if field in memory.immutable:
-                    raise WebServiceError(
-                            f'{field} cannot be changed for memory {number}.',
-                            422)
-                allowed = {
-                    'mode': rf.valid_modes,
-                    'duplex': rf.valid_duplexes,
-                    'tmode': rf.valid_tmodes,
-                    'rtone': rf.valid_tones,
-                    'ctone': rf.valid_tones,
-                    'dtcs': rf.valid_dtcs_codes,
-                    'rx_dtcs': rf.valid_dtcs_codes,
-                    'dtcs_polarity': rf.valid_dtcs_pols,
-                    'cross_mode': rf.valid_cross_modes,
-                    'tuning_step': rf.valid_tuning_steps,
-                    'skip': rf.valid_skips,
-                }.get(field)
-                if allowed is not None and value not in allowed:
-                    raise WebServiceError(
-                            f'{value!r} is not supported for {field}.', 422)
-                if field == 'name' and (
-                        not isinstance(value, str) or
-                        len(value) > rf.valid_name_length):
-                    raise WebServiceError(
-                            f'Name must be at most {rf.valid_name_length} '
-                            'characters.', 422)
-                if field in ('freq', 'offset') and (
-                        isinstance(value, bool) or
-                        not isinstance(value, (int, float)) or value < 0):
-                    raise WebServiceError(
-                            f'{field} must be a non-negative number.', 422)
-                if field == 'power':
-                    if rf.has_variable_power:
-                        memory.power = chirp_common.parse_power(str(value))
-                    else:
-                        level = next((
-                            item for item in rf.valid_power_levels
-                            if math.isclose(
-                                self._power_watts(item), float(value),
-                                rel_tol=1e-6)
-                        ), None)
-                        if level is None:
-                            raise WebServiceError(
-                                    'Power level is not supported.', 422)
-                        memory.power = level
-                else:
-                    setattr(memory, field, value)
-
-            seen_extra = set()
-            for change in extra_changes or []:
-                path = change['path']
-                key = tuple(path)
-                if key in seen_extra:
-                    raise WebServiceError(
-                            'An extra field can only be changed once.',
-                            422)
-                seen_extra.add(key)
-                value, owner = self._find_setting_value(
-                        memory.extra, path)
-                if not value.get_mutable():
-                    raise WebServiceError(
-                            'The selected extra field is read-only.', 422)
-                requested = change['value']
-                if isinstance(value, settings.RadioSettingValueBoolean):
-                    valid_type = type(requested) is bool
-                elif isinstance(value, settings.RadioSettingValueInteger):
-                    valid_type = type(requested) is int
-                elif isinstance(value, settings.RadioSettingValueFloat):
-                    valid_type = type(requested) in (int, float)
-                elif isinstance(value, settings.RadioSettingValueList):
-                    valid_type = type(requested) in (str, int)
-                elif isinstance(value, settings.RadioSettingValueString):
-                    valid_type = type(requested) is str
-                else:
-                    valid_type = False
-                if not valid_type:
-                    raise WebServiceError(
-                            'The value type does not match this extra field.',
-                            422)
-                try:
-                    value.set_value(requested)
-                except (settings.InvalidValueError, ValueError,
-                        TypeError) as exc:
-                    raise WebServiceError(str(exc), 422) from exc
-                warning = owner.get_warning(value.get_value())
-                if warning:
-                    raise WebServiceError(
-                            str(warning) +
-                            ' Driver-specific warning requires radio-level '
-                            'confirmation and cannot be bypassed here.',
-                            409)
-            warnings, errors = chirp_common.split_validation_msgs(
-                    rf.validate_memory(memory))
-            if errors:
-                raise WebServiceError(
-                        '; '.join(str(error) for error in errors), 422)
-            radio.set_memory(memory)
-            self._record_memory_change(
-                    {number: original},
-                    {number: copy.deepcopy(radio.get_memory(number))})
-            self.dirty = True
-            return {'memory': self._memory_dict(radio.get_memory(number)),
-                    'warnings': [str(warning) for warning in warnings]}
+        return self._memory_operations.update_memory(
+                number, values, extra_changes)
 
     def bulk_update_memories(self, numbers, values, extra_changes=None):
-        """Apply the same supported field changes to selected memories."""
-        with self.lock:
-            self._ensure_idle()
-            radio = self._require_radio()
-            if len(numbers) < 2 or len(numbers) > 200:
-                raise WebServiceError(
-                        'Select between 2 and 200 channels to edit.', 422)
-            if len(numbers) != len(set(numbers)):
-                raise WebServiceError(
-                        'A channel can only be selected once.', 422)
-            for number in numbers:
-                self._validate_memory_id(radio, number)
-                if radio.get_memory(number).empty:
-                    raise WebServiceError(
-                            'Bulk editing requires programmed channels.',
-                            422)
-
-            before = {
-                number: copy.deepcopy(radio.get_memory(number))
-                for number in numbers
-            }
-            previous_undo = copy.deepcopy(self.undo_stack)
-            previous_redo = copy.deepcopy(self.redo_stack)
-            was_dirty = self.dirty
-            warnings = []
-            try:
-                for number in numbers:
-                    result = self.update_memory(
-                            number, copy.deepcopy(values),
-                            copy.deepcopy(extra_changes))
-                    warnings.extend(
-                            f'Channel {number}: {warning}'
-                            for warning in result['warnings'])
-            except Exception:
-                self._restore_memories(radio, before, before)
-                self.undo_stack = previous_undo
-                self.redo_stack = previous_redo
-                self.dirty = was_dirty
-                raise
-            self.undo_stack = previous_undo
-            self.redo_stack = previous_redo
-            self._record_memory_change(
-                    before, {
-                        number: copy.deepcopy(radio.get_memory(number))
-                        for number in numbers
-                    })
-            return {'updated': len(numbers), 'warnings': warnings}
+        return self._memory_operations.bulk_update_memories(
+                numbers, values, extra_changes)
 
     def arrange_memories(self, numbers, operation, field='name',
                          direction='asc'):
-        """Sort or cluster a contiguous run of numbered channels."""
-        with self.lock:
-            self._ensure_idle()
-            radio = self._require_radio()
-            if not radio.get_features().can_delete:
-                raise WebServiceError(
-                        'This radio does not support channel arrangement.',
-                        422)
-            if operation not in ('sort', 'cluster'):
-                raise WebServiceError('Unknown arrangement operation.', 422)
-            if operation == 'sort' and field not in {
-                    'name', 'freq', 'mode', 'duplex', 'offset', 'tmode',
-                    'comment', 'rtone'}:
-                raise WebServiceError('Unsupported sort field.', 422)
-            if direction not in ('asc', 'desc'):
-                raise WebServiceError('Invalid sort direction.', 422)
-            if len(numbers) < 2 or len(numbers) > 200:
-                raise WebServiceError(
-                        'Select between 2 and 200 channels.', 422)
-            if (any(type(number) is not int for number in numbers) or
-                    len(numbers) != len(set(numbers))):
-                raise WebServiceError(
-                        'Arrange only unique numbered channels.', 422)
-            ordered = sorted(numbers)
-            if ordered[-1] - ordered[0] + 1 != len(ordered):
-                raise WebServiceError(
-                        'Selected channels must be contiguous.', 422)
-            radio_memories = [
-                radio.get_memory(number) for number in ordered
-            ]
-            if any(memory.extd_number for memory in radio_memories):
-                raise WebServiceError(
-                        'Special channels cannot be arranged.', 422)
-            before = {
-                number: copy.deepcopy(memory)
-                for number, memory in zip(ordered, radio_memories)
-            }
-            if operation == 'cluster':
-                sorted_memories = sorted(
-                    radio_memories,
-                    key=lambda memory: memory.empty)
-            else:
-                numeric_fields = {'freq', 'offset', 'rtone'}
-                sorted_memories = sorted(
-                    radio_memories,
-                    key=lambda memory: (
-                        getattr(memory, field) is None,
-                        (
-                            float(getattr(memory, field) or 0)
-                            if field in numeric_fields
-                            else str(getattr(memory, field) or '').casefold()
-                        ),
-                    ),
-                    reverse=direction == 'desc')
-            after = {}
-            for number, memory in zip(ordered, sorted_memories):
-                updated = copy.deepcopy(memory)
-                updated.number = number
-                after[number] = updated
-            try:
-                for number, memory in after.items():
-                    if memory.empty:
-                        radio.erase_memory(number)
-                    else:
-                        radio.set_memory(memory)
-            except Exception as exc:
-                self._restore_memories(radio, before, after)
-                raise WebServiceError(
-                        'The radio driver could not arrange the channels.',
-                        422) from exc
-            self._record_memory_change(
-                    before, {
-                        number: copy.deepcopy(radio.get_memory(number))
-                        for number in ordered
-                    })
-            self.dirty = True
-            return {'arranged': len(ordered)}
+        return self._memory_operations.arrange_memories(
+                numbers, operation, field, direction)
 
     class _BandplanConfig:
         def __init__(self, selected):
@@ -1800,7 +1124,7 @@ class DriverSession:
             }
 
     def update_memory_bank_membership(self, number, model_name, bank_index,
-                                     enabled):
+                                      enabled):
         """Toggle a memory's membership in one bank mapping."""
         with self.lock:
             self._ensure_idle()
@@ -2090,8 +1414,9 @@ class DriverSession:
                     if not radio.get_memory(number).empty
                 ]
                 destination_start = (max(used) + 1) if used else low
-            destinations = list(range(
-                    destination_start, destination_start + len(source_memories)))
+            destinations = list(
+                    range(destination_start,
+                          destination_start + len(source_memories)))
             if (destinations and destinations[-1] > high and
                     not radio.get_features().has_infinite_number):
                 raise WebServiceError(
@@ -2345,7 +1670,8 @@ class DriverSession:
             self._ensure_idle()
             radio = self._tab.radio
             if radio is None:
-                raise WebServiceError('Open a radio image before editing.', 409)
+                raise WebServiceError(
+                        'Open a radio image before editing.', 409)
             if isinstance(radio, chirp_common.LiveRadio):
                 raise WebServiceError(
                         'Live radios do not have an image to save. Export '

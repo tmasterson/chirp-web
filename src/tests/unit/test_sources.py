@@ -1,5 +1,22 @@
 """Tests for network-backed radio sources using local response fixtures."""
 
+
+# Copyright 2026 Tom Masterson <kd7cyu@gmail.com>
+#
+# This program is free software: you can redistribute it and/or modify
+# it under the terms of the GNU General Public License as published by
+# the Free Software Foundation, either version 3 of the License, or
+# (at your option) any later version.
+#
+# This program is distributed in the hope that it will be useful,
+# but WITHOUT ANY WARRANTY; without even the implied warranty of
+# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+# GNU General Public License for more details.
+#
+# You should have received a copy of the GNU General Public License
+# along with this program.  If not, see <http://www.gnu.org/licenses/>.
+
+
 import importlib
 import json
 from types import SimpleNamespace
@@ -12,8 +29,10 @@ import requests
 
 base = importlib.import_module('chirp_web.sources.base')
 dmrmarc = importlib.import_module('chirp_web.sources.dmrmarc')
-przemienniki_eu = importlib.import_module('chirp_web.sources.przemienniki_eu')
-przemienniki_net = importlib.import_module('chirp_web.sources.przemienniki_net')
+przemienniki_eu = importlib.import_module(
+        'chirp_web.sources.przemienniki_eu')
+przemienniki_net = importlib.import_module(
+        'chirp_web.sources.przemienniki_net')
 radioreference = importlib.import_module('chirp_web.sources.radioreference')
 repeaterbook = importlib.import_module('chirp_web.sources.repeaterbook')
 

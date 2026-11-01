@@ -24,5 +24,9 @@ jobs:
         run: pre-commit run --all-files
       - name: Check browser JavaScript syntax
         run: node --check src/chirp_web/webui/static/app.js
-      - name: Run test suite
-        run: pytest
+      - name: Type-check web API boundaries
+        run: mypy
+      - name: Run unit and package tests
+        run: pytest src/tests/unit src/tests/e2e/test_package.py
+      - name: Run Chromium browser tests
+        run: CHIRP_WEB_BROWSERS=chromium pytest src/tests/e2e/test_browser.py -q

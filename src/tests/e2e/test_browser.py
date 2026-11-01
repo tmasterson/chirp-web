@@ -1,5 +1,22 @@
 """Browser-level tests for core local web UI and accessibility behavior."""
 
+
+# Copyright 2026 Tom Masterson <kd7cyu@gmail.com>
+#
+# This program is free software: you can redistribute it and/or modify
+# it under the terms of the GNU General Public License as published by
+# the Free Software Foundation, either version 3 of the License, or
+# (at your option) any later version.
+#
+# This program is distributed in the hope that it will be useful,
+# but WITHOUT ANY WARRANTY; without even the implied warranty of
+# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+# GNU General Public License for more details.
+#
+# You should have received a copy of the GNU General Public License
+# along with this program.  If not, see <http://www.gnu.org/licenses/>.
+
+
 import csv
 import io
 import os
@@ -22,6 +39,12 @@ from selenium.webdriver.support.ui import WebDriverWait
 from chirp_web import chirp_common
 
 
+_BROWSER_NAMES = tuple(
+    name for name in os.environ.get(
+        'CHIRP_WEB_BROWSERS', 'chromium,firefox').split(',')
+    if name in {'chromium', 'firefox'})
+
+
 def _channel_csv():
     """Return an accepted CSV image with one populated channel."""
     memory = chirp_common.Memory(0)
@@ -40,7 +63,7 @@ def _channel_csv():
     return output.getvalue()
 
 
-@pytest.fixture(params=('chromium', 'firefox'))
+@pytest.fixture(params=_BROWSER_NAMES)
 def browser(request, running_web_app):
     """Open a supported headless browser against the installed application."""
     browser_name = request.param
@@ -53,7 +76,8 @@ def browser(request, running_web_app):
                 shutil.which('firefox-esr'),
             ) if path and os.path.isfile(path)), None)
         if not browser_path or not driver_path:
-            pytest.skip('Firefox system tests require Firefox and GeckoDriver.')
+            pytest.skip(
+                    'Firefox system tests require Firefox and GeckoDriver.')
         options = FirefoxOptions()
         options.binary_location = os.path.realpath(browser_path)
         options.add_argument('-headless')
@@ -103,7 +127,7 @@ def _wait(browser, condition):
 
 @pytest.fixture
 def file_upload(browser):
-    """Upload test files through native controls, respecting Firefox sandboxing."""
+    """Upload files through native controls, respecting Firefox sandboxing."""
     copied_files = []
 
     def upload(control_id, path):
@@ -190,14 +214,62 @@ def test_browser_advanced_diagnostics_are_explicit_and_read_only(
     browser.find_element(By.ID, 'closeAdvancedDiagnostics').click()
 
 
+def test_browser_connection_profiles_are_persisted(browser):
+    """Save and load local serial connection details through the profile UI."""
+    _wait(browser, conditions.presence_of_element_located(
+        (By.ID, 'connectionProfileName')))
+    browser.find_element(By.ID, 'connectionProfileName').send_keys('LOCAL')
+    manual_port = browser.find_element(By.ID, 'manualSerialPort')
+    manual_port.clear()
+    manual_port.send_keys('/dev/ttyTEST0')
+    browser.find_element(By.ID, 'saveConnectionProfile').click()
+    _wait(browser, conditions.text_to_be_present_in_element(
+        (By.ID, 'notice'), 'Connection profile saved.'))
+
+    browser.execute_script(
+        "document.getElementById('manualSerialPort').value = '/dev/changed';")
+    profile = browser.find_element(By.ID, 'connectionProfile')
+    browser.execute_script(
+        "arguments[0].value = 'LOCAL'; "
+        "arguments[0].dispatchEvent(new Event('change', {bubbles: true}));",
+        profile)
+    _wait(browser, lambda driver: not driver.find_element(
+        By.ID, 'loadConnectionProfile').get_attribute('disabled'))
+    browser.find_element(By.ID, 'loadConnectionProfile').click()
+    _wait(browser, lambda driver: driver.find_element(
+        By.ID, 'manualSerialPort').get_attribute('value') == '/dev/ttyTEST0')
+    stored = browser.execute_script(
+        "return JSON.parse(localStorage.getItem("
+        "'chirp-web-connection-profiles'));")
+    assert stored == [{
+        'name': 'LOCAL',
+        'radioId': browser.find_element(By.ID, 'radioModel').get_attribute(
+            'value'),
+        'port': '/dev/ttyTEST0',
+        'notes': '',
+    }]
+
+
+def test_browser_ignores_invalid_connection_profile_storage(browser):
+    """Keep local profile corruption from blocking the application."""
+    browser.execute_script(
+        "localStorage.setItem('chirp-web-connection-profiles', '{broken');")
+    browser.refresh()
+    _wait(browser, conditions.presence_of_element_located(
+        (By.ID, 'connectionProfile')))
+    assert browser.find_element(By.ID, 'connectionProfile').get_attribute(
+        'value') == ''
+
+
 def test_browser_accessibility_semantics_and_keyboard_controls(browser):
-    """Check accessible names, live regions, dialog labels, and tab controls."""
+    """Check accessible names, live regions, dialogs, and keyboard controls."""
     missing_names = browser.execute_script("""
       const text = (element) => element.textContent.trim();
       const name = (element) => {
         if (element.getAttribute('aria-label')) return true;
         if (element.getAttribute('aria-labelledby')) return true;
-        if (element.labels && [...element.labels].some((label) => text(label))) return true;
+        if (element.labels &&
+            [...element.labels].some((label) => text(label))) return true;
         return Boolean(text(element) || element.value || element.title);
       };
       return [...document.querySelectorAll('button, input, select, textarea')]
@@ -226,7 +298,8 @@ def test_browser_accessibility_semantics_and_keyboard_controls(browser):
       return [...document.querySelectorAll('dialog')].map((dialog) => ({
         id: dialog.id,
         label: dialog.getAttribute('aria-labelledby'),
-        exists: Boolean(document.getElementById(dialog.getAttribute('aria-labelledby'))),
+        exists: Boolean(
+          document.getElementById(dialog.getAttribute('aria-labelledby'))),
       }));
     """)
     assert dialogs
@@ -239,14 +312,16 @@ def test_browser_accessibility_semantics_and_keyboard_controls(browser):
     browser.find_element(By.ID, 'newConfiguration').click()
     _wait(browser, lambda current: len(
         current.find_elements(By.CSS_SELECTOR, '.image-tab')) == 1)
-    assert browser.find_element(By.ID, 'notice').get_attribute('role') == 'status'
+    assert browser.find_element(By.ID, 'notice').get_attribute(
+            'role') == 'status'
     browser.find_element(By.ID, 'newConfiguration').click()
     _wait(browser, lambda current: len(
         current.find_elements(By.CSS_SELECTOR, '.image-tab')) == 2)
 
     tabs = browser.find_elements(By.CSS_SELECTOR, '.image-tab')
     tabs[0].send_keys(Keys.ARROW_RIGHT)
-    assert browser.switch_to.active_element.get_attribute('class') == 'image-tab'
+    assert browser.switch_to.active_element.get_attribute(
+            'class') == 'image-tab'
     assert len(browser.find_elements(
         By.CSS_SELECTOR, '.image-tab-close[aria-label^="Move left"]')) == 2
     assert len(browser.find_elements(
@@ -255,5 +330,6 @@ def test_browser_accessibility_semantics_and_keyboard_controls(browser):
     browser.execute_script(
         "localStorage.setItem('chirp-web-view-preferences', '{broken');")
     browser.refresh()
-    _wait(browser, conditions.presence_of_element_located((By.ID, 'imageFile')))
+    _wait(browser, conditions.presence_of_element_located(
+            (By.ID, 'imageFile')))
     assert browser.title == 'CHIRP Web'

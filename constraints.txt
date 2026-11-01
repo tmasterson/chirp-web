@@ -1,0 +1,13 @@
+# Tested direct-dependency set. Update this file deliberately, validate with
+# the full suite, and commit the requirements and constraint changes together.
+fastapi==0.142.3
+httpx==0.28.1
+mypy==2.4.0
+pep8==1.7.1
+pre-commit==4.7.0
+pyserial==3.5
+pytest==9.1.1
+requests==2.34.2
+selenium==4.51.0
+suds==1.2.0
+uvicorn==0.54.0

@@ -1,5 +1,22 @@
 """Memory editing, image I/O, and transfer job routes."""
 
+
+# Copyright 2026 Tom Masterson <kd7cyu@gmail.com>
+#
+# This program is free software: you can redistribute it and/or modify
+# it under the terms of the GNU General Public License as published by
+# the Free Software Foundation, either version 3 of the License, or
+# (at your option) any later version.
+#
+# This program is distributed in the hope that it will be useful,
+# but WITHOUT ANY WARRANTY; without even the implied warranty of
+# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+# GNU General Public License for more details.
+#
+# You should have received a copy of the GNU General Public License
+# along with this program.  If not, see <http://www.gnu.org/licenses/>.
+
+
 from fastapi import Query
 from fastapi.responses import Response
 
@@ -110,7 +127,7 @@ def register_data_routes(app, session, transfers, log):
 
     @app.patch('/api/memories/{number}')
     def update_memory(number: str, payload: MemoryUpdate):
-        number = str(int(number)) if number.isdecimal() else number
+        memory_number = int(number) if number.isdecimal() else number
         values = payload.model_dump(exclude_unset=True)
         extra_changes = values.pop('extra_changes', None)
         if any(value is None for value in values.values()):
@@ -118,7 +135,7 @@ def register_data_routes(app, session, transfers, log):
                     'Memory field values cannot be null.', 422)
         if extra_changes is None and not values:
             raise WebServiceError('Provide at least one memory field.', 422)
-        return session.update_memory(number, values, extra_changes)
+        return session.update_memory(memory_number, values, extra_changes)
 
     @app.get('/api/banks')
     def list_banks():
@@ -127,9 +144,9 @@ def register_data_routes(app, session, transfers, log):
     @app.patch('/api/memories/{number}/banks')
     def update_memory_bank_membership(
             number: str, payload: BankMembershipRequest):
-        number = str(int(number)) if number.isdecimal() else number
+        memory_number = int(number) if number.isdecimal() else number
         return session.update_memory_bank_membership(
-                number,
+                memory_number,
                 payload.model,
                 payload.bank_index,
                 payload.enabled,
